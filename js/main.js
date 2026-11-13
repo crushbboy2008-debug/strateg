@@ -220,10 +220,12 @@ const minRing = flat(new THREE.RingGeometry(0.96, 1, 48), '#ff6a6a', 0.8);
 const zoneDisc = flat(new THREE.CircleGeometry(1, 72), '#ffffff', 0.08);
 const reticle = flat(new THREE.RingGeometry(0.85, 1, 40), '#ffd24a', 0.9);
 const rallyMark = flat(new THREE.RingGeometry(0.5, 1, 4), '#7dff9a', 0.9);
+const abilMark = flat(new THREE.RingGeometry(0.93, 1, 64), '#ff8a2a', 0.95), abilDisc = flat(new THREE.CircleGeometry(1, 48), '#ff8a2a', 0.16);
+const abilArea = a => a.key === 'rockets' ? a.spread + a.r : a.r; // радиус поражения способности
 
 function syncMarkers() {
   const me = G.players[G.human];
-  ghost.visible = rangeRing.visible = minRing.visible = zoneDisc.visible = reticle.visible = rallyMark.visible = false;
+  ghost.visible = rangeRing.visible = minRing.visible = zoneDisc.visible = reticle.visible = rallyMark.visible = abilMark.visible = abilDisc.visible = false;
   if (!G.running || !me) return;
   let zone = null;
   if (UI.placing && !G.possessed) {
@@ -231,6 +233,17 @@ function syncMarkers() {
     ghost.visible = true; ghost.position.set(Input.wx, 1.5, Input.wy); ghost.scale.setScalar(d.r);
     ghost.material.color.set(ok ? '#5dff7a' : '#ff5d5d');
     if (d.range) zone = { x: Input.wx, y: Input.wy, d };
+  } else if (UI.casting && !G.possessed) { // выбор точки для способности героя: круг дальности и область удара под курсором
+    const h = me.heroU;
+    if (!h || h.dead) UI.casting = false;
+    else {
+      const a = UNITS[h.type].abil, dx = Input.wx - h.x, dy = Input.wy - h.y, l = Math.hypot(dx, dy) || 1, k = Math.min(1, (a.range + h.r) / l);
+      zone = { x: h.x, y: h.y, d: { range: a.range, r: h.r } };
+      abilMark.visible = abilDisc.visible = true;
+      abilMark.position.set(h.x + dx * k, 1.6, h.y + dy * k); abilDisc.position.set(h.x + dx * k, 1.4, h.y + dy * k);
+      abilMark.scale.setScalar(abilArea(a)); abilDisc.scale.setScalar(abilArea(a));
+      abilMark.material.opacity = h.acd > 0 ? 0.35 : 0.95;
+    }
   } else if (UI.sel.length === 1 && UI.sel[0].kind === 'bld') {
     const b = UI.sel[0], d = BUILDINGS[b.type];
     if (d.range) zone = { x: b.x, y: b.y, d };
@@ -251,6 +264,13 @@ function syncMarkers() {
       reticle.visible = true;
       reticle.position.set(u.x + Math.cos(u.face) * ad, 1.5, u.y + Math.sin(u.face) * ad);
       reticle.scale.setScalar(d.splash || 9);
+    }
+    if (d.abil && d.abil.range) { // куда ляжет способность: дальность меняется колесом или наклоном взгляда
+      const ad = abilDist(u, d, Input.aim), ax = u.x + Math.cos(u.face) * ad, ay = u.y + Math.sin(u.face) * ad;
+      abilMark.visible = abilDisc.visible = true;
+      abilMark.position.set(ax, 1.6, ay); abilDisc.position.set(ax, 1.4, ay);
+      abilMark.scale.setScalar(abilArea(d.abil)); abilDisc.scale.setScalar(abilArea(d.abil));
+      abilMark.material.opacity = u.acd > 0 ? 0.3 : 0.95; abilDisc.visible = u.acd <= 0;
     }
   }
 }
@@ -557,7 +577,7 @@ function heroTip() {
   const p = me(), d = UNITS[p.fac.hero], a = d.abil, alive = p.heroU && !p.heroU.dead;
   return `<b>${d.name} <span class="lv">★ ${p.heroLvl}</span></b><div class="tc">${alive ? 'В строю · клик — выбрать' : COIN + heroCost(p) + (p.heroDeaths ? ' · возрождение ' : ' · призыв ') + d.time + ' с'}</div>
     <div class="ts">Здоровье ${unitMaxHp(p, p.fac.hero)} · Урон ${Math.round(d.dmg * (1 + 0.15 * p.up.atk) * (1 + 0.14 * (p.heroLvl - 1)))} · ${d.proj ? 'Дальность ' + d.range : 'Ближний бой'}</div>
-    <p>${d.info}</p><p><b>${a.name}</b> (раз в ${a.cd} с). ${a.info}</p><p>Набирает опыт в боях рядом с собой, до ${HERO_MAX}-го уровня. Уровень сохраняется после гибели.</p>`;
+    <p>${d.info}</p><p><b>${a.name}</b> (раз в ${a.cd} с). ${a.info}</p><p>Клавиша <b>V</b> — применить способность (метеор и ракеты — затем клик по цели). <b>Shift+V</b> — разрешить или запретить герою применять её самому.</p><p>Набирает опыт в боях рядом с собой, до ${HERO_MAX}-го уровня. Уровень сохраняется после гибели.</p>`;
 }
 function upTip(k) {
   const p = me(), d = UPGRADES[k], lvl = p.up[k], max = lvl >= d.cost.length;
@@ -567,6 +587,17 @@ function hireHero() {
   const p = me(), h = p.heroU;
   if (h && !h.dead) { UI.sel = [h]; UI.cam.x = h.x; UI.cam.y = h.y; hudT = 0; return; }
   const why = act({ c: 'hero' });
+  if (why) toast(why);
+}
+// Способность героя в режиме стратегии: V — применить (дальнобойная — выбрать точку кликом), Shift+V — вкл/выкл самостоятельное применение
+function castKey(toggleAuto) {
+  const p = me(), h = p.heroU;
+  if (toggleAuto) { const why = act({ c: 'auto' }); if (why) toast(why); hudT = 0; return; }
+  if (!h || h.dead) return toast('Героя нет в строю');
+  const a = UNITS[h.type].abil;
+  if (h.acd > 0) return toast(a.name + ': ещё ' + Math.ceil(h.acd) + ' с');
+  if (a.range) { UI.casting = !UI.casting; UI.placing = null; return; }
+  const why = act({ c: 'cast', x: h.x, y: h.y });
   if (why) toast(why);
 }
 function research(k) { const why = act({ c: 'research', key: k }); if (why) toast(why); }
@@ -608,7 +639,7 @@ function buildHud() {
   $('foes').innerHTML = G.players.filter(q => q.idx !== G.human).map(q => `<div class="foe" id="foe${q.idx}" style="--c:${q.fac.color}" title="${q.team === p.team ? 'Союзник' : 'Противник'}">${q.team === p.team ? '🤝 ' : ''}${q.fac.name}<div class="fhp"><i></i></div></div>`).join('');
 }
 
-function startPlacing(t) { if (G.possessed) return; UI.placing = UI.placing === t ? null : t; }
+function startPlacing(t) { if (G.possessed) return; UI.casting = false; UI.placing = UI.placing === t ? null : t; }
 function train(i) {
   const b = UI.sel.length === 1 && UI.sel[0].type === 'barracks' ? UI.sel[0] : null;
   const why = act({ c: 'train', slot: i, b: b ? b.id : 0 });
@@ -621,7 +652,7 @@ function selHtml() {
   if (us.length === 1) {
     const u = us[0], d = UNITS[u.type], p = me();
     const lv = d.hero ? ` <span class="lv">★ ${p.heroLvl}</span>` : '';
-    const extra = d.hero ? `<div class="desc"><b>${d.abil.name}</b>: ${u.acd > 0 ? 'через ' + Math.ceil(u.acd) + ' с' : 'готово'} · ${p.heroLvl >= HERO_MAX ? 'максимальный уровень' : 'опыт ' + Math.floor(p.heroXp) + ' / ' + heroNeed(p.heroLvl)}</div>` : `<div class="desc">${d.info}</div>`;
+    const extra = d.hero ? `<div class="desc"><b>${d.abil.name}</b> <kbd>V</kbd>: ${u.acd > 0 ? 'через ' + Math.ceil(u.acd) + ' с' : 'готово'} · сам: ${p.autoCast ? 'да' : 'нет'} · ${p.heroLvl >= HERO_MAX ? 'максимальный уровень' : 'опыт ' + Math.floor(p.heroXp) + ' / ' + heroNeed(p.heroLvl)}</div>` : `<div class="desc">${d.info}</div>`;
     return `<div class="selRow"><img class="pt" src="${portrait('unit', u.type, fk)}" alt=""><div style="flex:1"><b>${d.name}${lv}</b>${hpBar(u)}
       <div class="st">${Math.ceil(u.hp)} / ${u.maxHp} · урон ${Math.round(d.dmg * dmgMul(u))} · ${d.proj ? 'дальность ' + d.range : 'ближний бой'}</div></div></div>${extra}`;
   }
@@ -700,7 +731,7 @@ function hudTick(dt) {
     const d = UNITS[hero.type], src = portrait('unit', hero.type, fk), img = $('pImg');
     if (img.dataset.t !== hero.type) { img.src = src; img.dataset.t = hero.type; }
     $('pName').textContent = d.hero ? d.name + ' · ★ ' + p.heroLvl : d.name;
-    $('pInfo').textContent = d.abil ? 'ПКМ или Пробел — ' + d.abil.name + ': ' + (hero.acd > 0 ? 'через ' + Math.ceil(hero.acd) + ' с' : 'готово') : d.info;
+    $('pInfo').textContent = d.abil ? 'ПКМ или Пробел — ' + d.abil.name + ': ' + (hero.acd > 0 ? 'через ' + Math.ceil(hero.acd) + ' с' : 'готово') + (d.abil.range ? ' · колесо — дальность' : '') : d.info;
     $('pAb').classList.toggle('hidden', !d.abil);
     $('pHp').style.width = Math.max(0, hero.hp / hero.maxHp * 100) + '%';
     hideTip();
@@ -806,6 +837,14 @@ cv.addEventListener('mousedown', e => {
     return;
   }
   if (e.button === 0) {
+    if (UI.casting) {
+      const pos = groundAt(e.clientX, e.clientY);
+      if (!pos) return;
+      const why = act({ c: 'cast', x: pos.x, y: pos.y });
+      if (why) toast(why);
+      UI.casting = false;
+      return;
+    }
     if (UI.placing) {
       const pos = groundAt(e.clientX, e.clientY);
       if (!pos) return;
@@ -817,7 +856,7 @@ cv.addEventListener('mousedown', e => {
     }
     UI.drag = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
   } else if (e.button === 2) {
-    if (UI.placing) UI.placing = null; else command(e.ctrlKey);
+    if (UI.casting) UI.casting = false; else if (UI.placing) UI.placing = null; else command(e.ctrlKey);
   }
 });
 window.addEventListener('mouseup', e => {
@@ -861,12 +900,13 @@ window.addEventListener('keydown', e => {
     case 'KeyT': if (!G.possessed) research('arm'); break;
     case 'KeyY': if (!G.possessed) research('eco'); break;
     case 'KeyG': if (!G.possessed) repairKey(); break;
+    case 'KeyV': if (!G.possessed) castKey(e.shiftKey); break;
     case 'KeyF':
       if (G.possessed) unpossess();
       else { const u = UI.sel.find(x => x.kind === 'unit' && !x.dead); if (u) possess(u); else toast('Сначала выберите воина'); }
       break;
     case 'Tab': if (G.possessed) possessNext(); break;
-    case 'Escape': if (G.possessed) unpossess(); else if (UI.placing) UI.placing = null; else if (UI.sel.length) UI.sel = []; else setPause(true); break;
+    case 'Escape': if (G.possessed) unpossess(); else if (UI.casting) UI.casting = false; else if (UI.placing) UI.placing = null; else if (UI.sel.length) UI.sel = []; else setPause(true); break;
     case 'KeyE': if (!G.possessed) { UI.sel = G.units.filter(u => u.owner === G.human && !u.dead); hudT = 0; } break;
     case 'Space': if (!G.possessed) { const al = me().alarm, to = al && G.time - al.t < 10 ? al : me().hq; UI.cam.x = to.x; UI.cam.y = to.y; } break;
     case 'KeyP': case 'KeyH': setPause(true); break;
@@ -910,7 +950,7 @@ function startGame(init) {
   clearScene(); buildObstacles();
   if (G.net === 'host') Net.begin(cfg);
   if (document.pointerLockElement) document.exitPointerLock();
-  UI.sel = []; UI.placing = null; UI.drag = null; UI.paused = false; UI.lastAlert = -99;
+  UI.sel = []; UI.placing = null; UI.casting = false; UI.drag = null; UI.paused = false; UI.lastAlert = -99;
   UI.cam.x = me().hq.x; UI.cam.y = me().hq.y; UI.cam.dist = 900; camSnap = true;
   buildHud();
   for (const id of SCREENS) $(id).classList.add('hidden');

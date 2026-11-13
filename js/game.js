@@ -11,7 +11,7 @@ function blankInput() { return { keys: {}, yaw: 0, aim: 0.7, lmb: false, rmb: fa
 // c — { faction, bot, team }. inp — откуда читается управление вселённым воином (у местного игрока — общий Input)
 function mkPlayer(i, c) {
   return { idx: i, faction: c.faction, fac: FACTIONS[c.faction], bot: !!c.bot, team: c.team, gold: START_GOLD, alive: true, income: 0, alarm: null, ai: { t: rand(0, 1), wave: 5 },
-    up: { atk: 0, arm: 0, eco: 0 }, research: null, heroLvl: 1, heroXp: 0, heroU: null, heroDeaths: 0, lost: 0, bl: 0, poss: null, inp: i === G.human ? Input : blankInput(), nq: [] };
+    up: { atk: 0, arm: 0, eco: 0 }, research: null, heroLvl: 1, heroXp: 0, heroU: null, heroDeaths: 0, lost: 0, bl: 0, autoCast: true, poss: null, inp: i === G.human ? Input : blankInput(), nq: [] };
 }
 // Сообщение игроку: местному — сразу на экран, удалённому — уйдёт по сети
 function note(p, text) { if (p.idx === G.human) G.notes.push(text); else if (G.net === 'host' && !p.bot) p.nq.push(text); }
@@ -232,6 +232,8 @@ function castAbility(u, d, tx, ty) {
     }
   }
 }
+// Дальность применения способности при вселении: aim 0..1 задаётся колесом мыши или наклоном взгляда
+function abilDist(u, d, aim) { const a = d.abil; return a.range ? u.r + 50 + (a.range - 50) * aim : 0; }
 // Решает, стоит ли герою под управлением ИИ применить способность сейчас
 function heroAuto(u, d) {
   const a = d.abil;
@@ -529,7 +531,7 @@ function controlPossessed(u, d, dt, Input) { // Input — управление �
   }
   u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.015 * dt);
   if (d.abil && u.acd <= 0 && (Input.rmb || k.Space)) {
-    const ad = d.proj ? d.range + u.r : 0;
+    const ad = abilDist(u, d, Input.aim);
     castAbility(u, d, u.x + Math.cos(u.face) * ad, u.y + Math.sin(u.face) * ad);
   }
   if (u.cd > 0) return;
@@ -581,7 +583,7 @@ function updateUnit(u, dt) {
       const t = findTarget(u, d.aggro, 0, d.bm > 1);
       if (t) u.tgt = t; else if (u.tgt && edgeDist(u, u.tgt) > d.aggro * 1.6) u.tgt = null;
     }
-    if (d.abil && u.acd <= 0) heroAuto(u, d);
+    if (d.abil && u.acd <= 0 && (G.players[u.owner].bot || G.players[u.owner].autoCast)) heroAuto(u, d);
   }
   let act = u.tgt, heal = false;
   if (d.heal && u.healTgt && !u.healTgt.dead && u.healTgt.hp < u.healTgt.maxHp && u.order.type !== 'move') { act = u.healTgt; heal = true; }

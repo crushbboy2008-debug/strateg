@@ -79,6 +79,21 @@ function execCmd(p, m) {
       }
       return '';
     }
+    case 'cast': { // способность героя по приказу; x, y — цель (для метеора и ракет), дальше дальности не бьёт
+      const u = p.heroU;
+      if (!u || u.dead) return 'Героя нет в строю';
+      const d = UNITS[u.type], a = d.abil;
+      if (u.stun > 0) return 'Герой оглушён';
+      if (u.acd > 0) return a.name + ': ещё ' + Math.ceil(u.acd) + ' с';
+      let tx = u.x, ty = u.y;
+      if (a.range) {
+        const dx = fin(m.x) - u.x, dy = fin(m.y) - u.y, l = Math.hypot(dx, dy) || 1, k = Math.min(1, (a.range + u.r) / l);
+        tx = u.x + dx * k; ty = u.y + dy * k; u.face = Math.atan2(dy, dx);
+      }
+      castAbility(u, d, tx, ty);
+      return '';
+    }
+    case 'auto': p.autoCast = !p.autoCast; note(p, 'Герой применяет способность сам: ' + (p.autoCast ? 'да' : 'нет')); return '';
     case 'possess':
       setPossess(p, m.id ? own(m.id, 'unit') : null);
       if (p.poss && p.inp !== Input) { p.inp.yaw = fin(m.yaw); p.inp.lmb = p.inp.rmb = false; p.inp.keys = {}; }
@@ -213,7 +228,7 @@ const Net = {
     }
     for (const q of G.projs) p.push([q.id || (q.id = G.nextId++), q.kind, r1(q.x), r1(q.y), r1(q.h), r2(q.ang || 0), q.lob ? 1 : 0]);
     const pl = G.players.map(q => [Math.floor(q.gold), r1(q.income), q.alive ? 1 : 0, q.up.atk, q.up.arm, q.up.eco, q.research ? [q.research.key, r1(q.research.t), q.research.time] : 0,
-      q.heroLvl, Math.floor(q.heroXp), q.heroDeaths, q.heroU && !q.heroU.dead ? q.heroU.id : 0, q.alarm ? [Math.round(q.alarm.x), Math.round(q.alarm.y), r1(q.alarm.t)] : 0, q.lost, q.bl, q.bot ? 1 : 0]);
+      q.heroLvl, Math.floor(q.heroXp), q.heroDeaths, q.heroU && !q.heroU.dead ? q.heroU.id : 0, q.alarm ? [Math.round(q.alarm.x), Math.round(q.alarm.y), r1(q.alarm.t)] : 0, q.lost, q.bl, q.bot ? 1 : 0, q.autoCast ? 1 : 0]);
     const ev = G.evq.splice(0).map(e => e.map(v => (typeof v === 'number' ? r1(v) : v)));
     return { t: 's', T: r2(G.time), u, b, p, pl, ev, dp: G.props.filter(q => q.dead).map(q => q.id), w: G.winTeam === undefined ? null : G.winTeam };
   },
@@ -326,7 +341,7 @@ const Net = {
       p.research = a[6] ? { key: a[6][0], t: a[6][1], time: a[6][2] } : null;
       p.heroLvl = a[7]; p.heroXp = a[8]; p.heroDeaths = a[9]; p.heroU = byId.get(a[10]) || null;
       p.alarm = a[11] ? { x: a[11][0], y: a[11][1], t: a[11][2] } : null;
-      p.lost = a[12]; p.bl = a[13]; p.bot = !!a[14];
+      p.lost = a[12]; p.bl = a[13]; p.bot = !!a[14]; p.autoCast = !!a[15];
     });
     for (const id of s.dp) { const q = this.props.get(id); if (q) q.dead = true; }
     for (const ev of s.ev) { // эффекты и звуки, случившиеся на хосте
