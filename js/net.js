@@ -16,6 +16,28 @@ function netErr(e) {
   return 'Ошибка сети' + (t ? ': ' + t : '');
 }
 
+// Библиотека соединений отбрасывает сообщения крупнее ~16 КБ, поэтому большие (старт с картой, снимки в разгар боя)
+// режутся на части и собираются на той стороне. Канал надёжный и упорядоченный, части приходят подряд.
+const CHUNK = 6000;
+let chunkId = 0;
+function netSend(c, m) {
+  const s = JSON.stringify(m);
+  if (s.length < CHUNK) { c.send(m); return; }
+  const id = ++chunkId, n = Math.ceil(s.length / CHUNK);
+  for (let i = 0; i < n; i++) c.send({ t: 'ch', id, i, n, d: s.slice(i * CHUNK, (i + 1) * CHUNK) });
+}
+function netRecv(c, m, handle) {
+  if (!m || m.t !== 'ch') return handle(m);
+  if (!c.buf || c.buf.id !== m.id) c.buf = { id: m.id, parts: [] };
+  c.buf.parts[m.i] = m.d;
+  if (m.i !== m.n - 1) return;
+  const text = c.buf.parts.join('');
+  c.buf = null;
+  let o;
+  try { o = JSON.parse(text); } catch (e) { return; }
+  handle(o);
+}
+
 // Приказ игрока. Выполняется на хосте (и в одиночной игре). Возвращает '' или причину отказа.
 function execCmd(p, m) {
   if (m.c === 'in') { // ввод вселённого воина от клиента
@@ -105,25 +127,25 @@ const Net = {
   },
   accept(c) {
     c.on('open', () => {
-      if (this.playing || this.lobby.slots.length >= 4) { c.send({ t: 'closed', text: this.playing ? 'В комнате уже идёт бой' : 'Комната заполнена' }); setTimeout(() => c.close(), 500); return; }
+      if (this.playing || this.lobby.slots.length >= 4) { netSend(c, { t: 'closed', text: this.playing ? 'В комнате уже идёт бой' : 'Комната заполнена' }); setTimeout(() => c.close(), 500); return; }
       const free = Object.keys(FACTIONS).find(f => !this.lobby.slots.some(s => s.faction === f));
       this.lobby.slots.push({ id: c.peer, faction: free });
       c.seen = Date.now();
       this.conns.push(c);
       this.pushLobby();
     });
-    c.on('data', m => this.hostMsg(c, m));
-    c.on('close', () => this.drop(c));
-    c.on('error', () => this.drop(c));
+    c.on('data', m => netRecv(c, m, o => this.hostMsg(c, o)));
+    c.on('close', () => this.drop(c, 'соединение закрыто'));
+    c.on('error', () => {}); // сбой отдельного сообщения — не повод выгонять игрока; обрыв поймает проверка связи
   },
-  drop(c) {
+  drop(c, why) {
     const i = this.conns.indexOf(c);
     if (i < 0 || this.role !== 'host') return;
     this.conns.splice(i, 1);
     this.lobby.slots = this.lobby.slots.filter(s => s.id !== c.peer);
     if (this.playing) for (const p of G.players) if (p.conn === c) { // за ушедшего доигрывает бот
       p.conn = null; setPossess(p, null); p.bot = true;
-      if (p.alive) G.notes.push(p.fac.name + ': игрок отключился, за него играет бот');
+      if (p.alive) G.notes.push(p.fac.name + ': игрок отключился (' + (why || 'вышел') + '), за него играет бот');
     }
     this.pushLobby();
   },
@@ -137,13 +159,13 @@ const Net = {
   pushLobby() {
     const L = this.lobby;
     L.bots = Math.max(0, Math.min(L.bots, 4 - L.slots.length));
-    for (const c of this.conns) if (c.open) c.send({ t: 'lobby', lobby: L, you: L.slots.findIndex(s => s.id === c.peer), playing: this.playing });
+    for (const c of this.conns) if (c.open) netSend(c, { t: 'lobby', lobby: L, you: L.slots.findIndex(s => s.id === c.peer), playing: this.playing });
     this.on.lobby();
   },
   hostMsg(c, m) {
     if (!m || typeof m !== 'object') return;
     c.seen = Date.now();
-    if (m.t === 'bye') { this.drop(c); try { c.close(); } catch (e) { /* уже закрыто */ } return; }
+    if (m.t === 'bye') { this.drop(c, 'закрыл игру'); try { c.close(); } catch (e) { /* уже закрыто */ } return; }
     if (m.t === 'fac') {
       const s = this.lobby.slots.find(q => q.id === c.peer);
       if (s && !this.playing && FACTIONS[m.faction] && !this.lobby.slots.some(q => q !== s && q.faction === m.faction)) { s.faction = m.faction; this.pushLobby(); }
@@ -151,7 +173,7 @@ const Net = {
       const p = G.players.find(q => q.conn === c);
       if (!p) return;
       const why = execCmd(p, m);
-      if (why) c.send({ t: 'msg', text: why });
+      if (why) netSend(c, { t: 'msg', text: why });
     }
   },
   // Состав партии по настройкам комнаты: сначала люди, потом боты
@@ -171,13 +193,13 @@ const Net = {
       const c = this.conns.find(q => q.peer === s.id), p = G.players[i];
       if (!c || !c.open) { p.bot = true; return; }
       p.conn = c;
-      c.send({ t: 'start', you: i, cfg: { map: cfg.map, diff: cfg.diff, coop: cfg.coop, players: cfg.players }, seed: G.seed, obstacles: G.obstacles, props, snap });
+      netSend(c, { t: 'start', you: i, cfg: { map: cfg.map, diff: cfg.diff, coop: cfg.coop, players: cfg.players }, seed: G.seed, obstacles: G.obstacles.map(o => ({ x: r1(o.x), y: r1(o.y), r: r1(o.r), tree: o.tree, seed: r2(o.seed), kind: o.kind })), props, snap });
     });
   },
   finish() { // хост вышел в меню: бой окончен для всех
     if (this.role !== 'host' || !this.playing) return;
     this.playing = false;
-    for (const c of this.conns) if (c.open) c.send({ t: 'end' });
+    for (const c of this.conns) if (c.open) netSend(c, { t: 'end' });
     this.pushLobby();
   },
   snap() {
@@ -203,8 +225,11 @@ const Net = {
     for (const p of G.players) {
       const c = p.conn;
       if (!c || !c.open) continue;
-      if (p.nq.length) c.send({ t: 'n', n: p.nq.splice(0) });
-      c.send(s);
+      if (p.nq.length) netSend(c, { t: 'n', n: p.nq.splice(0) });
+      // Медленная связь: если прошлые снимки ещё не ушли, этот пропускаем — следующий всё равно несёт полное состояние
+      const dc = c.dataChannel;
+      if (dc && dc.bufferedAmount > 120000) continue;
+      netSend(c, s);
     }
   },
 
@@ -220,14 +245,14 @@ const Net = {
       peer.on('open', () => {
         const c = this.hostConn = peer.connect(ROOM + code, { reliable: true, serialization: 'json' });
         c.on('open', () => { this.seen = Date.now(); if (!done) { done = true; res(); } });
-        c.on('data', m => this.clientMsg(m));
+        c.on('data', m => netRecv(c, m, o => this.clientMsg(o)));
         c.on('close', () => { if (this.peer === peer) { this.leave(); this.on.closed('Соединение с хостом потеряно'); } });
       });
       peer.on('error', e => fail(netErr(e)));
       setTimeout(() => fail('Не удалось подключиться. Проверьте код комнаты'), 15000);
     });
   },
-  send(m) { const c = this.hostConn; if (c && c.open) c.send(m); },
+  send(m) { const c = this.hostConn; if (c && c.open) netSend(c, m); },
   clientMsg(m) {
     if (!m || typeof m !== 'object') return;
     this.seen = Date.now();
@@ -337,18 +362,23 @@ const Net = {
   },
 };
 
-// Проверка связи: браузер не сразу замечает, что вкладка собеседника закрыта, поэтому обе стороны шлют «я тут»
+// Проверка связи: браузер не сразу замечает, что вкладка собеседника закрыта, поэтому обе стороны шлют «я тут».
+// Срок большой: пока у игрока строится карта, его вкладка занята и молчит несколько секунд (на слабом компьютере — дольше).
+const NET_TIMEOUT = 45000;
+let netTick = Date.now();
 setInterval(() => {
-  const now = Date.now();
+  const now = Date.now(), stalled = now - netTick > 5000; // сами только что «висели» — чужое молчание за это время не считается
+  netTick = now;
   if (Net.role === 'client' && Net.hostConn && Net.hostConn.open) {
     Net.send({ t: 'ping' });
-    if (now - Net.seen > 12000) { Net.leave(); Net.on.closed('Соединение с хостом потеряно'); }
+    if (stalled) Net.seen = now;
+    else if (now - Net.seen > NET_TIMEOUT) { Net.leave(); Net.on.closed('Соединение с хостом потеряно'); }
   } else if (Net.role === 'host') {
     for (const c of Net.conns.slice()) {
-      if (now - c.seen > 10000) { Net.drop(c); try { c.close(); } catch (e) { /* уже закрыто */ } }
-      else if (c.open) c.send({ t: 'ping' });
+      if (stalled) c.seen = now;
+      else if (now - c.seen > NET_TIMEOUT) { Net.drop(c, 'нет связи'); try { c.close(); } catch (e) { /* уже закрыто */ } }
+      else if (c.open) netSend(c, { t: 'ping' });
     }
   }
-}, 2000);
-// Закрывая вкладку, клиент прощается, чтобы хост сразу посадил на его место бота
+}, 2000);// Закрывая вкладку, клиент прощается, чтобы хост сразу посадил на его место бота
 window.addEventListener('pagehide', () => { if (Net.role === 'client') Net.send({ t: 'bye' }); });
