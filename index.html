@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Стратег</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="cv"></canvas>
+<canvas id="ov"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="hurt"></div>
+
+  <div id="top">
+    <div class="pill" title="Золото"><i class="ico coin"></i><b id="gold">0</b><span id="inc"></span></div>
+    <div class="pill" title="Войска"><i class="ico pop"></i><b id="pop">0</b></div>
+    <div class="pill" title="Время боя"><i class="ico clock"></i><b id="clock">0:00</b></div>
+    <div id="foes"></div>
+    <div class="spacer"></div>
+    <button class="tbtn" id="soundBtn" title="Звук">♪</button>
+    <button class="tbtn" id="helpBtn" title="Управление (H)">?</button>
+    <button class="tbtn" id="pauseBtn" title="Пауза (P)">❚❚</button>
+  </div>
+
+  <div id="alert" class="hidden">Ваша база атакована!<span>Пробел — перейти к месту боя</span></div>
+
+  <div id="bottom">
+    <div id="miniWrap"><canvas id="mini" width="200" height="200"></canvas></div>
+    <div id="panel">
+      <div class="group"><div class="gt">Постройки</div><div id="buildBtns" class="btns"></div></div>
+      <div class="group" id="trainGroup"><div class="gt">Казарма</div><div id="trainBtns" class="btns"></div></div>
+      <div class="group" id="hqGroup"><div class="gt">Цитадель</div><div class="btns"><div id="heroBox"></div><div id="upBtns" class="ups"></div></div></div>
+      <div class="group" id="selBox"><div class="gt">Выбрано</div><div id="selInfo"></div>
+        <button id="possessBtn" class="wide hidden">Вселиться <kbd>F</kbd></button>
+        <button id="repairBtn" class="wide hidden">Починить <kbd>G</kbd></button></div>
+    </div>
+  </div>
+
+  <div id="tip" class="hidden"></div>
+
+  <div id="possessHud" class="hidden">
+    <div class="pTop">
+      <img id="pImg" alt="">
+      <div class="pMain">
+        <div id="pName"></div>
+        <div class="bar hp"><div id="pHp"></div></div>
+        <div class="bar cd"><div id="pCd"></div></div>
+        <div id="pInfo"></div>
+      </div>
+    </div>
+    <div id="pHint"><span><kbd>WASD</kbd> движение</span><span><kbd>Мышь</kbd> обзор</span><span><kbd>ЛКМ</kbd> атака</span><span id="pAb"><kbd>ПКМ</kbd> способность</span><span><kbd>Tab</kbd> другой воин</span><span><kbd>Esc</kbd> выйти</span></div>
+  </div>
+  <div id="cross" class="hidden"><i></i></div>
+  <div id="toast"></div>
+</div>
+
+<div id="menu" class="screen">
+  <div class="box">
+    <h1>СТРАТЕГ</h1>
+    <p class="sub">Построй базу, собери армию и разрушь цитадели врагов. В любого воина можно вселиться и сражаться самому.</p>
+    <div id="modeBtns" class="seg"></div>
+    <div id="netBox" class="hidden"></div>
+    <div class="row-title">Выбери фракцию</div>
+    <div id="facCards"></div>
+    <div class="row-title">Карта</div>
+    <div id="mapCards"></div>
+    <div class="opts">
+      <div><div class="row-title">Противники</div><div id="botBtns" class="seg"></div></div>
+      <div><div class="row-title">Сложность</div><div id="diffBtns" class="seg"></div></div>
+    </div>
+    <button id="startBtn" class="big">В бой</button>
+    <p class="beta">Бета-версия · играть с клавиатурой и мышью на компьютере · управление — клавиша H в игре · для сетевой игры нужен интернет</p>
+  </div>
+</div>
+
+<div id="pauseMenu" class="screen hidden">
+  <div class="box narrow">
+    <h2>Пауза</h2>
+    <p id="pauseNet" class="beta hidden">Сетевая игра: бой продолжается, пока открыто это меню.</p>
+    <div class="menuBtns">
+      <button id="resumeBtn" class="big small">Продолжить</button>
+      <button id="restartBtn" class="plain">Начать заново</button>
+      <button id="quitBtn" class="plain">В главное меню</button>
+    </div>
+    <div class="keys">
+      <div>
+        <h4>Стратегия</h4>
+        <p><kbd>ЛКМ</kbd> выбрать, рамка — несколько</p>
+        <p><kbd>ПКМ</kbd> приказ, по врагу — атака</p>
+        <p><kbd>Ctrl</kbd>+<kbd>ПКМ</kbd> идти, не ввязываясь в бой</p>
+        <p><kbd>WASD</kbd> камера, колесо — масштаб</p>
+        <p><kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd> постройки, <kbd>Shift</kbd> — ставить подряд</p>
+        <p><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> обучить воина, <kbd>4</kbd> — герой</p>
+        <p><kbd>R</kbd> <kbd>T</kbd> <kbd>Y</kbd> улучшения: оружие, броня, добыча</p>
+        <p><kbd>G</kbd> починить выбранное здание, без выбора — все</p>
+        <p><kbd>E</kbd> вся армия, <kbd>Пробел</kbd> к базе</p>
+      </div>
+      <div>
+        <h4>Вселение</h4>
+        <p><kbd>F</kbd> или двойной клик — вселиться</p>
+        <p><kbd>WASD</kbd> движение, мышь — обзор</p>
+        <p><kbd>ЛКМ</kbd> атака</p>
+        <p><kbd>ПКМ</kbd> лечение (жрец), способность (герой)</p>
+        <p>Колесо — дальность броска</p>
+        <p><kbd>Tab</kbd> перескочить в соседнего</p>
+        <p><kbd>Esc</kbd> или <kbd>F</kbd> — выйти</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="end" class="screen hidden">
+  <div class="box narrow">
+    <h1 id="endTitle"></h1>
+    <p class="sub" id="endSub"></p>
+    <div id="endStats"></div>
+    <div class="menuBtns row">
+      <button id="againBtn" class="big small">Ещё раз</button>
+      <button id="endMenuBtn" class="plain">В главное меню</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/net.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
