@@ -38,13 +38,121 @@ function compose(p, r, s) {
 }
 const Z3 = [0, 0, 0];
 
+// ---- Пробный стиль «мятая ткань»: открыть страницу с ?craft ----
+// Каждая фигура дробится на более мелкие треугольники, вершины слегка сдвигаются, а грани получают чуть разный тон.
+// Вместо ровных цилиндров и коробок выходит неровная гранёная поверхность, как у сшитой или вырезанной вручную вещи.
+const CRAFT = new URLSearchParams(location.search).has('craft');
+const CRAFT_K = Math.max(0, Math.min(3, parseFloat(new URLSearchParams(location.search).get('craft')) || 1)); // сила эффекта: ?craft=0.5 слабее, ?craft=2 сильнее
+function h3(x, y, z, s) { const v = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719 + s * 4.1) * 43758.5453; return v - Math.floor(v); }
+function roughen(t, noSplit) { // t — плоский массив xyz треугольников одной фигуры
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < t.length; i++) { const k = i % 3; if (t[i] < lo[k]) lo[k] = t[i]; if (t[i] > hi[k]) hi[k] = t[i]; }
+  const dims = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]], minD = Math.min(...dims), maxD = Math.max(...dims);
+  const amp = Math.min(0.1 * minD, 0.014 * maxD + 0.08) * CRAFT_K, maxE = Math.max(3, amp * 13), passes = noSplit ? 0 : maxD > 20 ? 2 : 1;
+  const mid = (P, Q) => [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2, (P[2] + Q[2]) / 2], len = (P, Q) => Math.hypot(P[0] - Q[0], P[1] - Q[1], P[2] - Q[2]);
+  for (let p = 0; p < passes; p++) { // делится каждое длинное ребро, поэтому соседние треугольники стыкуются без щелей
+    const o = [], push = (...ps) => { for (const q of ps) o.push(q[0], q[1], q[2]); };
+    for (let i = 0; i < t.length; i += 9) {
+      const A = [t[i], t[i + 1], t[i + 2]], B = [t[i + 3], t[i + 4], t[i + 5]], C = [t[i + 6], t[i + 7], t[i + 8]];
+      const ab = len(A, B) > maxE, bc = len(B, C) > maxE, ca = len(C, A) > maxE, k = ab + bc + ca;
+      if (!k) push(A, B, C);
+      else if (k === 3) { const D = mid(A, B), E = mid(B, C), F = mid(C, A); push(A, D, F, D, B, E, F, E, C, D, E, F); }
+      else if (k === 1) {
+        if (ab) { const D = mid(A, B); push(A, D, C, D, B, C); } else if (bc) { const E = mid(B, C); push(A, B, E, A, E, C); } else { const F = mid(C, A); push(A, B, F, F, B, C); }
+      } else if (!ab) { const E = mid(B, C), F = mid(C, A); push(C, F, E, A, B, E, A, E, F); }
+      else if (!bc) { const D = mid(A, B), F = mid(C, A); push(A, D, F, D, B, C, D, C, F); }
+      else { const D = mid(A, B), E = mid(B, C); push(D, B, E, A, D, E, A, E, C); }
+    }
+    t = o;
+  }
+  for (let i = 0; i < t.length; i += 3) { // сдвиг зависит только от положения вершины: совпадающие вершины едут вместе
+    const kx = Math.round(t[i] * 4), ky = Math.round(t[i + 1] * 4), kz = Math.round(t[i + 2] * 4);
+    t[i] += (h3(kx, ky, kz, 1) - 0.5) * 2 * amp; t[i + 1] += (h3(kx, ky, kz, 2) - 0.5) * 1.6 * amp; t[i + 2] += (h3(kx, ky, kz, 3) - 0.5) * 2 * amp;
+  }
+  return t;
+}
+
+// ---- Пробный стиль «цельная кожа»: открыть страницу с ?skin ----
+// Часть тела задаётся набором капсул и шаров. Они сливаются в одно гладкое поле, по которому строится одна
+// непрерывная гранёная оболочка: шея плавно переходит в плечи, плечо в руку, бедро в голень — без стыков отдельных фигур.
+const ONESKIN = new URLSearchParams(location.search).has('skin');
+// prims: { a, b?, ra, rb?, sx?, c } — капсула от a до b с радиусами ra..rb (без b — шар); sx сплющивает по оси X; c — цвет
+function blobTris(prims, cell, k, floor) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const p of prims) for (const q of [p.a, p.b || p.a]) { const r = Math.max(p.ra, p.rb === undefined ? p.ra : p.rb) + cell * 1.6; for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], q[i] - r); hi[i] = Math.max(hi[i], q[i] + r); } }
+  if (floor !== undefined) lo[1] = Math.max(lo[1], floor - cell * 1.6);
+  const nx = Math.ceil((hi[0] - lo[0]) / cell) + 1, ny = Math.ceil((hi[1] - lo[1]) / cell) + 1, nz = Math.ceil((hi[2] - lo[2]) / cell) + 1;
+  let near = 0;
+  const field = (x, y, z) => { // расстояние до поверхности (меньше нуля — внутри); near — ближайшая фигура, от неё берётся цвет
+    let d = Infinity, bd = Infinity;
+    for (let n = 0; n < prims.length; n++) {
+      const p = prims[n], sx = p.sx || 1, a = p.a, b = p.b || a, rb = p.rb === undefined ? p.ra : p.rb;
+      const px = (x - a[0]) / sx, py = y - a[1], pz = z - a[2], bx = (b[0] - a[0]) / sx, by = b[1] - a[1], bz = b[2] - a[2];
+      const bb = bx * bx + by * by + bz * bz, t = bb ? Math.max(0, Math.min(1, (px * bx + py * by + pz * bz) / bb)) : 0;
+      const di = Math.hypot(px - bx * t, py - by * t, pz - bz * t) - (p.ra + (rb - p.ra) * t);
+      if (di < bd) { bd = di; near = n; }
+      if (d === Infinity) d = di; else { const h = Math.max(k - Math.abs(d - di), 0) / k; d = Math.min(d, di) - h * h * k * 0.25; }
+    }
+    return floor !== undefined ? Math.max(d, floor - y) : d;
+  };
+  const vals = new Float32Array(nx * ny * nz), at = (i, j, l) => i + nx * (j + ny * l);
+  for (let l = 0; l < nz; l++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) vals[at(i, j, l)] = field(lo[0] + i * cell, lo[1] + j * cell, lo[2] + l * cell);
+  // по одной вершине в каждой клетке, которую пересекает поверхность: среднее точек пересечения на рёбрах клетки
+  const cv = new Int32Array(nx * ny * nz).fill(-1), V = [];
+  for (let l = 0; l < nz - 1; l++) for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+    let sxm = 0, sym = 0, szm = 0, cnt = 0;
+    for (let c = 0; c < 8; c++) for (const bit of [1, 2, 4]) {
+      if (c & bit) continue;
+      const e = c | bit, x0 = i + (c & 1), y0 = j + ((c >> 1) & 1), z0 = l + ((c >> 2) & 1), x1 = i + (e & 1), y1 = j + ((e >> 1) & 1), z1 = l + ((e >> 2) & 1);
+      const v0 = vals[at(x0, y0, z0)], v1 = vals[at(x1, y1, z1)];
+      if ((v0 < 0) === (v1 < 0)) continue;
+      const t = v0 / (v0 - v1);
+      sxm += x0 + (x1 - x0) * t; sym += y0 + (y1 - y0) * t; szm += z0 + (z1 - z0) * t; cnt++;
+    }
+    if (!cnt) continue;
+    const jx = (h3(i, j, l, 1) - 0.5) * 0.3, jy = (h3(i, j, l, 2) - 0.5) * 0.3, jz = (h3(i, j, l, 3) - 0.5) * 0.3; // лёгкая неровность сетки
+    cv[at(i, j, l)] = V.length / 3;
+    V.push(lo[0] + (sxm / cnt + jx) * cell, lo[1] + (sym / cnt + jy) * cell, lo[2] + (szm / cnt + jz) * cell);
+  }
+  // грань на каждом ребре сетки, которое пересекает поверхность: её углы — вершины четырёх клеток вокруг ребра
+  const tris = [], ci = [];
+  const quad = (q, axis, inside) => {
+    if (q.some(v => v < 0)) return;
+    const P = q.map(v => [V[v * 3], V[v * 3 + 1], V[v * 3 + 2]]), u = (axis + 1) % 3, w = (axis + 2) % 3;
+    const na = (P[1][u] - P[0][u]) * (P[2][w] - P[0][w]) - (P[1][w] - P[0][w]) * (P[2][u] - P[0][u]); // нормаль вдоль оси ребра
+    const o = (na > 0) === inside ? [0, 1, 2, 3] : [0, 3, 2, 1], flip = h3(q[0], q[1], q[2], 5) > 0.5; // диагональ делится то так, то эдак
+    for (const t of flip ? [[0, 1, 3], [1, 2, 3]] : [[0, 1, 2], [0, 2, 3]]) {
+      const A = P[o[t[0]]], B = P[o[t[1]]], C = P[o[t[2]]];
+      field((A[0] + B[0] + C[0]) / 3, (A[1] + B[1] + C[1]) / 3, (A[2] + B[2] + C[2]) / 3);
+      tris.push(...A, ...B, ...C); ci.push(near);
+    }
+  };
+  for (let l = 1; l < nz - 1; l++) for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) {
+    const v0 = vals[at(i, j, l)], ins = v0 < 0;
+    if (ins !== (vals[at(i + 1, j, l)] < 0)) quad([cv[at(i, j - 1, l - 1)], cv[at(i, j, l - 1)], cv[at(i, j, l)], cv[at(i, j - 1, l)]], 0, ins);
+    if (ins !== (vals[at(i, j + 1, l)] < 0)) quad([cv[at(i - 1, j, l - 1)], cv[at(i - 1, j, l)], cv[at(i, j, l)], cv[at(i, j, l - 1)]], 1, ins);
+    if (ins !== (vals[at(i, j, l + 1)] < 0)) quad([cv[at(i - 1, j - 1, l)], cv[at(i, j - 1, l)], cv[at(i, j, l)], cv[at(i - 1, j, l)]], 2, ins);
+  }
+  return { tris, ci };
+}
+
 class Part {
-  constructor(name) { this.name = name; this.buf = [[], []]; this.gbuf = [[], []]; this.kids = []; this.pos = Z3; this.rot = Z3; this.stack = [new THREE.Matrix4()]; }
+  constructor(name) { this.plain = /decor|islands|clouds/.test(name); this.noSplit = name === 'obstacles'; this.name = name; this.buf = [[], []]; this.gbuf = [[], []]; this.kids = []; this.pos = Z3; this.rot = Z3; this.stack = [new THREE.Matrix4()]; }
   _add(buf, geom, color, p = Z3, r = Z3, s = 1) {
     const g = geom.index ? geom.toNonIndexed() : geom;
     const m = compose(p, r, s).premultiply(this.stack[this.stack.length - 1]);
     _c.set(color);
     const a = g.attributes.position;
+    if (CRAFT && buf === this.buf && !this.plain) {
+      let t = [];
+      for (let i = 0; i < a.count; i++) { _v.fromBufferAttribute(a, i).applyMatrix4(m); t.push(_v.x, _v.y, _v.z); }
+      t = roughen(t, this.noSplit);
+      for (let i = 0; i < t.length; i += 9) {
+        const f = 1 - 0.055 * CRAFT_K + 0.11 * CRAFT_K * h3(Math.round(t[i] + t[i + 3] + t[i + 6]), Math.round(t[i + 1] + t[i + 4] + t[i + 7]), Math.round(t[i + 2] + t[i + 5] + t[i + 8]), 7);
+        for (let j = 0; j < 9; j += 3) { buf[0].push(t[i + j], t[i + j + 1], t[i + j + 2]); buf[1].push(_c.r * f, _c.g * f, _c.b * f); }
+      }
+      return this;
+    }
     for (let i = 0; i < a.count; i++) {
       _v.fromBufferAttribute(a, i).applyMatrix4(m);
       buf[0].push(_v.x, _v.y, _v.z); buf[1].push(_c.r, _c.g, _c.b);
@@ -52,6 +160,15 @@ class Part {
     return this;
   }
   add(geom, color, p, r, s) { return this._add(this.buf, geom, color, p, r, s); }
+  blob(prims, o = {}) { // цельная оболочка из капсул и шаров (см. blobTris)
+    const r = blobTris(prims, o.cell || 0.95, o.k === undefined ? 1.2 : o.k, o.floor), m = this.stack[this.stack.length - 1], t = r.tris;
+    for (let i = 0; i < t.length; i += 9) {
+      _c.set(prims[r.ci[i / 9]].c);
+      const f = 0.95 + 0.1 * h3(Math.round(t[i] * 3), Math.round(t[i + 1] * 3), Math.round(t[i + 2] * 3), 7); // чуть разный тон граней
+      for (let j = 0; j < 9; j += 3) { _v.set(t[i + j], t[i + j + 1], t[i + j + 2]).applyMatrix4(m); this.buf[0].push(_v.x, _v.y, _v.z); this.buf[1].push(_c.r * f, _c.g * f, _c.b * f); }
+    }
+    return this;
+  }
   glow(geom, color, p, r, s) { return this._add(this.gbuf, geom, color, p, r, s); }
   at(p, r, fn, s = 1) { // всё, что добавлено внутри fn, получает этот сдвиг/поворот
     this.stack.push(compose(p, r, s).clone().premultiply(this.stack[this.stack.length - 1]));
@@ -83,23 +200,28 @@ function human(o = {}) {
   const skin = o.skin || SKIN, top = o.top || '#888', sleeve = o.sleeve || top, bulk = o.bulk || 1, arm = o.arm || 1;
   const root = new Part('model'), anim = [];
   if (o.robe) {
-    root.add(C(3.3, 6.6, 11.5, 10), o.robe, [0, 5.75, 0]).add(C(6.7, 6.9, 1.3, 10), o.trim || top, [0, 0.9, 0]);
+    if (ONESKIN) root.blob([{ a: [0, 10.4, 0], b: [0, 2.2, 0], ra: 3.2, rb: 6.2, c: o.robe }], { floor: 0.4, k: 0.8 }).add(C(6.7, 6.9, 1.3, 10), o.trim || top, [0, 0.9, 0]);
+    else root.add(C(3.3, 6.6, 11.5, 10), o.robe, [0, 5.75, 0]).add(C(6.7, 6.9, 1.3, 10), o.trim || top, [0, 0.9, 0]);
   } else for (const s of [1, -1]) {
     const leg = root.kid(s > 0 ? 'legR' : 'legL', [0, 10, s * 2.3 * bulk]);
-    leg.add(C(1.9 * bulk, 1.5, 7.4, 6), o.legs || '#4a3b2c', [0, -3.6, 0]).add(B(4.6, 3, 3.3), o.boots || '#2e241b', [0.7, -8.5, 0]);
+    if (ONESKIN) leg.blob([{ a: [0, 0.3, 0], b: [0, -6.9, 0], ra: 1.95 * bulk, rb: 1.4, c: o.legs || '#4a3b2c' }, { a: [-0.4, -8.45, 0], b: [2.6, -8.5, 0], ra: 1.5, c: o.boots || '#2e241b' }], { k: 0.9, cell: 1.05 });
+    else leg.add(C(1.9 * bulk, 1.5, 7.4, 6), o.legs || '#4a3b2c', [0, -3.6, 0]).add(B(4.6, 3, 3.3), o.boots || '#2e241b', [0.7, -8.5, 0]);
     anim.push({ n: leg.name, k: 'limb', base: 0, walk: s * 0.8, atk: 0 });
   }
   const torso = root.kid('torso', [0, 10, 0]);
-  torso.at([0, 4.9, 0], Z3, t => t.add(C(4.7 * bulk, 3.7 * bulk, 9.6, 8), top), [0.72, 1, 1]);
+  if (ONESKIN) torso.blob([{ a: [0, 6.6, 0], b: [0, 1.6, 0], ra: 4.5 * bulk, rb: 3.6 * bulk, sx: 0.74, c: top }, { a: [0, 9.4, 0], b: [0, 11.4, 0], ra: 1.55, c: skin }, { a: [0, 13.8, 0], ra: 3.45, c: skin }], { k: 1.5 });
+  else torso.at([0, 4.9, 0], Z3, t => t.add(C(4.7 * bulk, 3.7 * bulk, 9.6, 8), top), [0.72, 1, 1]);
   if (!o.bare) torso.at([0, 0.9, 0], Z3, t => t.add(C(3.9 * bulk, 3.9 * bulk, 1.4, 8), o.belt || DWOOD), [0.75, 1, 1]);
-  torso.add(C(1.3, 1.5, 1.6, 6), skin, [0, 10.2, 0]);
+  if (!ONESKIN) torso.add(C(1.3, 1.5, 1.6, 6), skin, [0, 10.2, 0]);
   const head = torso.kid('head', [0, 13.7, 0]);
-  head.add(S(3.5, 9, 7), skin, Z3, Z3, [1, 1.05, 1]).add(B(0.5, 1, 0.9), EYE, [3.25, 0.3, 1.3]).add(B(0.5, 1, 0.9), EYE, [3.25, 0.3, -1.3]);
+  if (!ONESKIN) head.add(S(3.5, 9, 7), skin, Z3, Z3, [1, 1.05, 1]);
+  head.add(B(0.5, 1, 0.9), EYE, [3.25, 0.3, 1.3]).add(B(0.5, 1, 0.9), EYE, [3.25, 0.3, -1.3]);
   const arms = {};
   for (const s of [1, -1]) {
     const n = s > 0 ? 'armR' : 'armL';
     const a = arms[n] = torso.kid(n, [0, 9.1, s * (5.2 * bulk + 0.6)]);
-    a.add(S(2.0 * arm, 7, 5), o.shoulder || sleeve).add(C(1.5 * arm, 1.25 * arm, 8, 6), o.bareArms ? skin : sleeve, [0, -4.3, 0]).add(S(1.5 * arm, 6, 5), skin, HAND);
+    if (ONESKIN) a.blob([{ a: Z3, ra: 2.0 * arm, c: o.shoulder || sleeve }, { a: [0, -0.8, 0], b: [0, -7.3, 0], ra: 1.5 * arm, rb: 1.2 * arm, c: o.bareArms ? skin : sleeve }, { a: HAND, ra: 1.45 * arm, c: skin }], { k: 0.9, cell: 0.8 });
+    else a.add(S(2.0 * arm, 7, 5), o.shoulder || sleeve).add(C(1.5 * arm, 1.25 * arm, 8, 6), o.bareArms ? skin : sleeve, [0, -4.3, 0]).add(S(1.5 * arm, 6, 5), skin, HAND);
     anim.push({ n, k: 'limb', base: 0.12, walk: -s * 0.55, atk: 0 });
   }
   return { root, torso, head, armR: arms.armR, armL: arms.armL, anim };
@@ -373,6 +495,232 @@ const U = {
     return { root, anim, scale: 1.2 };
   },
 };
+
+// ================= Новые модели персонажей: цельные вылепленные фигуры =================
+// Тело — не набор приставленных фигур, а одна гранёная оболочка: вытянутая фигура, лицо, одежда, шлем и борода
+// вылеплены вместе с телом и различаются цветом. Твёрдыми отдельными предметами остаются только оружие и щиты.
+const HND = [0, -9.6, 0], HEAD_Y = 12.6; // кисть (в координатах руки) и центр головы (в координатах туловища)
+const helm = (c, crest) => [{ a: [-0.15, 13.95, 0], ra: 3.05, c }].concat(crest ? [{ a: [-2.2, 16.6, 0], b: [1.6, 16.9, 0], ra: 0.75, c: crest }] : []);
+const hood = c => [{ a: [-0.5, 13.5, 0], ra: 3.2, c }, { a: [-1.6, 11.4, 0], b: [-1.4, 8.6, 0], ra: 2.4, rb: 3.0, sx: 0.7, c }];
+const hair = c => [{ a: [-0.75, 13.6, 0], ra: 2.9, c }];
+const beard = (c, len) => [{ a: [2.2, 10.6, 0], b: [2.9, 10.6 - len, 0], ra: 1.35, rb: 0.35, c }];
+const wizhat = (c, band, h) => [{ a: [-0.15, 14.6, 0], b: [-0.2, 15.2, 0], ra: 2.95, c: band }, { a: [-0.2, 15.4, 0], b: [-1.9, 15.4 + h, 0], ra: 2.7, rb: 0.35, c }];
+const brow = c => [{ a: [2.35, 13.8, -1.3], b: [2.35, 13.8, 1.3], ra: 0.62, c }];
+const cuff = c => [{ a: [0, -6.2, 0], b: [0, -8.7, 0], ra: 1.1, rb: 2.0, c }];
+function body(o = {}) {
+  const skin = o.skin || SKIN, shirt = o.shirt || '#888', sleeve = o.sleeve || shirt, pants = o.pants || '#4a3b2c', boots = o.boots || '#2e241b', b = o.bulk || 1, ar = o.arm || 1;
+  const root = new Part('model'), anim = [];
+  if (o.robe) {
+    root.blob([{ a: [0, 12.4, 0], b: [0, 1.8, 0], ra: 2.5 * b, rb: 5.1 * b, c: o.robe }].concat(o.hem ? [{ a: [0, 1.3, 0], b: [0, 0.2, 0], ra: 5.45 * b, c: o.hem }] : []), { floor: 0.3, k: 0.6, cell: 1.05 });
+  } else for (const s of [1, -1]) {
+    const leg = root.kid(s > 0 ? 'legR' : 'legL', [0, 12.5, s * 1.75 * b]);
+    leg.blob([{ a: [0, 0.3, 0], b: [0, -5.6, 0], ra: 1.75 * b, rb: 1.3 * b, c: pants }, { a: [0, -5.6, 0], b: [0, -10.4, 0], ra: 1.25 * b, rb: 1.05, c: o.shin || pants },
+      { a: [-0.3, -11.25, 0], b: [2.5, -11.35, 0], ra: 1.2, c: boots }].concat(o.legX || []), { k: 0.7, cell: 0.82 });
+    anim.push({ n: leg.name, k: 'limb', base: 0, walk: s * 0.8, atk: 0 });
+  }
+  const torso = root.kid('torso', [0, 12.5, 0]);
+  const T = [
+    { a: [0, 0.2, 0], ra: 2.8 * b, sx: 0.8, c: o.robe || pants },
+    { a: [0, 2.7, 0], b: [0, 6.4, 0], ra: 2.9 * b, rb: 3.45 * b, sx: 0.72, c: shirt },
+    { a: [0, 8.2, 0], b: [0, 10.4, 0], ra: 1.05 * (o.neck || 1), c: skin },
+    { a: [0.15, 12.7, 0], ra: 2.85, c: o.noFace || skin }, { a: [0.75, 11.2, 0], ra: 1.95 * (o.jaw || 1), c: o.noFace || skin },
+  ];
+  if (o.belt) T.push({ a: [0, 1.6, 0], b: [0, 2.2, 0], ra: 3.08 * b, sx: 0.77, c: o.belt });
+  if (!o.noFace) T.push({ a: [3.05, 12.15, 0], ra: 0.6, c: skin }, { a: [2.5, 13.05, 1.05], ra: 0.8, c: '#f1f0ea' }, { a: [2.5, 13.05, -1.05], ra: 0.8, c: '#f1f0ea' });
+  if (o.front) T.push({ a: [1.9 * b, 1.7, 0], b: [2.2 * b, 6.3, 0], ra: 2.5 * b, sx: 0.32, c: o.front });
+  if (o.cape) T.push({ a: [-2.4 * b, 7.4, 0], b: [-3.7 * b, -4.6, 0], ra: 3.3 * b, rb: 4.3 * b, sx: 0.2, c: o.cape });
+  torso.blob(T.concat(o.torsoX || []), { k: 0.8, cell: 0.94 });
+  if (!o.noFace) {
+    torso.add(B(0.45, 0.55, 0.55), EYE, [3.3, 13.05, 1.12]).add(B(0.45, 0.55, 0.55), EYE, [3.3, 13.05, -1.12]);
+    if (!o.orc) torso.add(B(0.4, 0.3, 1.3), '#6a3a32', [2.72 * (o.jaw || 1), 10.95, 0]);
+  }
+  if (o.orc) { // клыки и острые уши
+    const z = o.orc;
+    torso.add(CN(0.36 * z, 1.5 * z, 4), BONE, [2.55 * (o.jaw || 1), 11.2, 1.05]).add(CN(0.36 * z, 1.5 * z, 4), BONE, [2.55 * (o.jaw || 1), 11.2, -1.05])
+      .add(CN(0.7, 2.6, 4), skin, [-0.2, 13.2, 3.2], [1.15, 0, 0]).add(CN(0.7, 2.6, 4), skin, [-0.2, 13.2, -3.2], [-1.15, 0, 0]);
+  }
+  const head = torso.kid('head', [0, HEAD_Y, 0]), arms = {};
+  for (const s of [1, -1]) {
+    const n = s > 0 ? 'armR' : 'armL';
+    const a = arms[n] = torso.kid(n, [0, 7.7, s * (3.25 * b + 0.75 * ar)]);
+    a.blob([{ a: Z3, ra: (o.pauldron ? 2.15 : 1.6) * ar, c: o.pauldron || sleeve }, { a: [0, -0.6, 0], b: [0, -4.8, 0], ra: 1.3 * ar, rb: 1.05 * ar, c: o.bareArms ? skin : sleeve },
+      { a: [0, -4.8, 0], b: [0, -8.5, 0], ra: 1.05 * ar, rb: 0.9 * ar, c: o.glove || (o.bareArms ? skin : sleeve) }, { a: HND, ra: 1.2 * ar, c: o.mitt || skin }].concat(o.armX || []), { k: 0.6, cell: 0.8 });
+    anim.push({ n, k: 'limb', base: 0.12, walk: -s * 0.55, atk: 0 });
+  }
+  return { root, torso, head, armR: arms.armR, armL: arms.armL, anim };
+}
+const heroRing = (H, r = 10) => H.root.glow(T(r, 0.45, 4, 24), GOLD, [0, 0.7, 0], [PI / 2, 0, 0]);
+
+Object.assign(U, {
+  // ---------- Легион ----------
+  swordsman(f) {
+    const H = body({ shirt: '#8e97a3', front: f.color, pauldron: STEEL, pants: '#566070', shin: DSTEEL, boots: DSTEEL, glove: DSTEEL, belt: DWOOD, cape: f.dark, torsoX: helm(STEEL, f.color) });
+    H.head.add(B(0.5, 2.2, 0.55), STEEL, [2.95, 0.9, 0]);
+    H.armL.at([1.9, -6.2, -0.6], Z3, p => shield(p, f));
+    H.armR.at(HND, Z3, p => sword(p, 13));
+    pose(H, 'armR', { base: 0.4, atk: 1.9 }); pose(H, 'armL', { base: 0.55, walk: 0.15 });
+    return { root: H.root, anim: H.anim, scale: 1.02 };
+  },
+  archer(f) {
+    const H = body({ shirt: f.color, pants: '#5b4a35', glove: LEATHER, belt: LEATHER, torsoX: hood(f.dark).concat([{ a: [-3.1, 3.4, 1.3], b: [-3.7, 9.2, 1.9], ra: 1.0, c: LEATHER }, { a: [2.3, 7.4, 0], b: [-2.2, 3, 0], ra: 0.5, sx: 0.5, c: LEATHER }]) });
+    for (const dz of [-0.45, 0.35, 1.0]) H.torso.add(C(0.2, 0.2, 3, 4), WOOD, [-3.9, 11, 2 + dz], [0.3, 0, 0.12]).add(B(0.9, 1.2, 0.2), '#f4f1e6', [-4, 12.2, 2.3 + dz], [0.3, 0, 0.12]);
+    H.armL.at([0, -2.2, 0], Z3, p => p.add(T(7.5, 0.45, 5, 12, PI), WOOD, Z3, [0, 0, PI]).add(B(15, 0.16, 0.16), '#e9e4d4').add(B(1, 1.4, 1), LEATHER, [0, -7.5, 0]));
+    pose(H, 'armL', { base: 1.45, walk: 0.08 }); pose(H, 'armR', { base: 0.95, walk: 0.25, atk: -0.6 });
+    return { root: H.root, anim: H.anim, scale: 0.97 };
+  },
+  knight(f) {
+    const root = new Part('model'), anim = [], HC = '#8a6444', HD = '#3d2a1c';
+    root.blob([{ a: [-5.4, 12.9, 0], b: [5, 13.3, 0], ra: 3.5, rb: 3.3, c: HC }, { a: [-6.3, 13.4, 0], ra: 3.5, c: HC }, { a: [6, 14.4, 0], b: [10.4, 20.4, 0], ra: 2.5, rb: 1.5, c: HC },
+      { a: [10.6, 21, 0], b: [14.4, 19, 0], ra: 1.55, rb: 1.05, c: HC }, { a: [5.3, 17.3, 0], b: [9.1, 22.1, 0], ra: 1.3, rb: 1.0, c: HD }, { a: [-9, 14, 0], b: [-11.6, 7.6, 0], ra: 1.0, rb: 0.35, c: HD },
+      { a: [-2.7, 13.2, 0], b: [1.7, 13.3, 0], ra: 3.9, c: f.color }, { a: [-3.4, 13.2, 0], b: [-3.2, 13.2, 0], ra: 4.0, c: GOLD }], { k: 0.9, cell: 1.05 });
+    root.add(CN(0.5, 1.7, 4), HC, [10.4, 22.9, 0.9]).add(CN(0.5, 1.7, 4), HC, [10.4, 22.9, -0.9]).add(B(0.5, 0.7, 0.5), EYE, [12.4, 20.9, 1.35]).add(B(0.5, 0.7, 0.5), EYE, [12.4, 20.9, -1.35]);
+    [[5.6, 2.1, 1], [5.6, -2.1, -1], [-5.8, 2.1, -1], [-5.8, -2.1, 1]].forEach(([x, z, sg], i) => {
+      root.kid('h' + i, [x, 10.2, z]).blob([{ a: [0, 0.6, 0], b: [0, -8.3, 0], ra: 1.3, rb: 0.75, c: HC }, { a: [0.2, -9.2, 0], ra: 0.98, c: HD }], { k: 0.5, cell: 0.8 });
+      anim.push({ n: 'h' + i, k: 'limb', base: 0, walk: sg * 0.7, atk: 0 });
+    });
+    const H = body({ shirt: STEEL, front: f.color, pauldron: STEEL, sleeve: '#8e97a3', pants: '#566070', shin: DSTEEL, boots: DSTEEL, glove: DSTEEL, cape: f.dark, noFace: STEEL,
+      torsoX: [{ a: [0.1, 12.9, 0], ra: 3.2, c: STEEL }, { a: [-1, 15.8, 0], b: [-3.6, 19, 0], ra: 1.15, rb: 0.4, c: f.color }] });
+    H.root.name = 'rider'; H.root.pos = [-1.5, 4.9, 0];
+    H.root.kids[0].rot = [-0.5, 0, 0.55]; H.root.kids[1].rot = [0.5, 0, 0.55];
+    root.kids.push(H.root);
+    H.head.add(B(0.5, 0.6, 4.4), EYE, [3.05, 0.4, 0]);
+    H.armL.at([1.9, -6.2, -0.6], Z3, p => shield(p, f));
+    H.armR.at(HND, [0, 0, -0.5], p => p.add(C(0.45, 0.65, 30, 6), '#e8e2d0', [9, 0, 0], LAYX).add(CN(0.9, 3.4, 6), STEEL, [25.6, 0, 0], LAYX)
+      .add(CN(2.2, 2.6, 8), GOLD, [1.8, 0, 0], LAYX).add(B(5, 3, 0.25), f.color, [20, -1.9, 0]));
+    for (const a of H.anim) if (a.n.startsWith('arm')) anim.push({ ...a, walk: 0 });
+    pose({ anim }, 'armR', { base: 0.5 }); pose({ anim }, 'armL', { base: 0.6 });
+    anim.push({ n: 'armR', k: 'kick', amp: -5 });
+    return { root, anim, scale: 1 };
+  },
+  // ---------- Орда ----------
+  berserker(f) {
+    const H = body({ skin: ORC, shirt: ORC, bareArms: true, bulk: 1.12, arm: 1.2, pants: '#5a4632', belt: f.color, jaw: 1.25, orc: 1,
+      torsoX: brow(ORC).concat([{ a: [-2.2, 15.6, 0], b: [1.3, 15.9, 0], ra: 0.85, c: f.color }, { a: [2.3, 0.8, 0], b: [2.6, -3.4, 0], ra: 1.9, sx: 0.3, c: f.color },
+        { a: [2.4, 7, -2.2], b: [2.2, 2.6, 2.4], ra: 0.55, sx: 0.5, c: LEATHER }]) });
+    H.armR.at(HND, Z3, p => axe(p, 9.5)); H.armL.at(HND, Z3, p => axe(p, 9.5));
+    pose(H, 'armR', { base: 0.45, atk: 1.9 }); pose(H, 'armL', { base: 0.45, atk: 1.9, lag: true });
+    return { root: H.root, anim: H.anim, scale: 1.0 };
+  },
+  axethrower(f) {
+    const H = body({ skin: ORC, shirt: LEATHER, bareArms: true, pauldron: f.color, pants: '#5a4632', belt: DWOOD, jaw: 1.2, orc: 1, torsoX: brow(ORC).concat([{ a: [-0.3, 14.25, 0], ra: 2.95, c: f.color },
+      { a: [-2.6, 13.6, 0.4], b: [-4.6, 12.4, 0.9], ra: 0.7, rb: 0.3, c: f.color }]) });
+    H.torso.at([-3.2, 4.2, 1.5], [0.3, 0, PI / 2], p => axe(p, 7, 0.8)).at([-3.2, 4.2, -1.5], [-0.3, 0, PI / 2], p => axe(p, 7, 0.8));
+    H.armR.at(HND, Z3, p => axe(p, 8.5));
+    pose(H, 'armR', { base: 0.5, atk: 2.3 }); pose(H, 'armL', { base: 0.2 });
+    return { root: H.root, anim: H.anim, scale: 1.0 };
+  },
+  ogre(f) {
+    const OG = '#8fae62';
+    const H = body({ skin: OG, shirt: OG, bareArms: true, bulk: 1.5, arm: 1.65, pants: '#6b563c', boots: '#3d3024', belt: DWOOD, jaw: 1.45, neck: 1.7, orc: 1.5,
+      torsoX: brow(OG).concat([{ a: [1.5, 3.4, 0], ra: 5.0, c: OG }, { a: [0, 8.4, -6.4], ra: 3.1, c: DSTEEL }, { a: [3.6, 0.2, 0], b: [4.2, -4.2, 0], ra: 2.8, sx: 0.3, c: f.color },
+        { a: [-3.4, 0.2, 0], b: [-3.8, -4, 0], ra: 2.8, sx: 0.3, c: f.color }]) });
+    H.torso.add(CN(0.9, 3.4, 5), BONE, [0, 11.8, -6.4]).add(CN(0.9, 3.4, 5), BONE, [0, 10.2, -9.2], [-1.2, 0, 0]).add(CN(0.9, 3.4, 5), BONE, [2.4, 10.4, -6.8], [0, 0, -0.9]).add(S(1.3, 6, 5), BONE, [5.2, 1.9, 0]);
+    H.head.add(CN(0.8, 3, 5), BONE, [0.6, 3.6, 0], [0, 0, -0.3]);
+    H.armR.at(HND, Z3, p => {
+      p.add(C(2.7, 1.1, 16, 7), WOOD, [6.5, 0, 0], LAYX).add(C(2.5, 2.5, 1, 7), DSTEEL, [9, 0, 0], LAYX).add(C(2.85, 2.85, 1, 7), DSTEEL, [13, 0, 0], LAYX);
+      for (let i = 0; i < 6; i++) p.add(CN(0.6, 2.4, 4), BONE, [11 + (i % 2) * 2.4, Math.cos(i * 1.05) * 2.9, Math.sin(i * 1.05) * 2.9], [i * 1.05, 0, 0]);
+    });
+    pose(H, 'armR', { base: 0.45, atk: 2.0 }); pose(H, 'armL', { base: 0.3 });
+    return { root: H.root, anim: H.anim, scale: 1.55 };
+  },
+  // ---------- Чародеи ----------
+  golem(f) { // сросшиеся валуны со светящимися прожилками
+    const root = new Part('model'), anim = [], ST = '#918e89', ST2 = '#6f6c69', GL = f.color;
+    for (const s of [1, -1]) {
+      const leg = root.kid(s > 0 ? 'legR' : 'legL', [0, 9, s * 3.6]);
+      leg.blob([{ a: [0, 0.4, 0], b: [0, -5.4, 0], ra: 2.5, rb: 2.9, c: ST }, { a: [0, -7.2, 0], b: [1.6, -7.3, 0], ra: 2.6, c: ST2 }], { floor: -9, k: 0.5, cell: 1 });
+      leg.glow(T(2.75, 0.3, 4, 12), GL, [0, -2.6, 0], [PI / 2, 0, 0]);
+      anim.push({ n: leg.name, k: 'limb', base: 0, walk: s * 0.55, atk: 0 });
+    }
+    const t = root.kid('torso', [0, 9, 0]);
+    t.blob([{ a: [0, 1.6, 0], ra: 4.4, sx: 0.8, c: ST2 }, { a: [0.3, 7.6, -2.6], b: [0.3, 7.6, 2.6], ra: 5.4, sx: 0.8, c: ST }, { a: [0, 12, 8], ra: 3.7, c: ST2 }, { a: [0, 12, -8], ra: 3.7, c: ST2 },
+      { a: [1.1, 15.2, 0], ra: 2.7, c: ST2 }, { a: [-2.4, 12.6, 2], ra: 3.2, c: ST }], { k: 0.9, cell: 1.05 });
+    t.glow(OCT(2.3), GL, [4.5, 8, 0]).glow(OCT(1.9), GL, [-1, 16.2, 8.4], Z3, [1, 1.8, 1]).glow(OCT(1.7), GL, [0.6, 15.8, -7.6], [0, 0, 0.2], [1, 1.8, 1]).glow(B(0.5, 0.8, 3.2), GL, [3.7, 15.5, 0])
+      .glow(T(4.0, 0.3, 4, 14), GL, [0, 2.6, 0], [PI / 2, 0, 0]);
+    t.kid('head', [1, 14.8, 0]);
+    for (const s of [1, -1]) {
+      const n = s > 0 ? 'armR' : 'armL', a = t.kid(n, [0, 11.5, s * 9.2]);
+      a.blob([{ a: [0, -1, 0], b: [0, -7.5, 0], ra: 2.2, rb: 2.9, c: ST }, { a: [0.2, -12.6, 0], ra: 3.7, c: ST2 }], { k: 0.8, cell: 1 });
+      a.glow(T(2.75, 0.3, 4, 12), GL, [0, -6.4, 0], [PI / 2, 0, 0]);
+      anim.push({ n, k: 'limb', base: 0.1, walk: -s * 0.35, atk: s > 0 ? 1.7 : 0 });
+    }
+    return { root, anim, scale: 1.25 };
+  },
+  pyromancer(f) {
+    const H = body({ robe: f.color, hem: f.dark, shirt: f.color, belt: GOLD, armX: cuff(f.dark), torsoX: wizhat(f.dark, GOLD, 7).concat(beard('#d9d4c8', 3.6), [{ a: [0, 7.5, 0], b: [0, 8.6, 0], ra: 2.3, c: f.dark }]) });
+    H.head.add(C(5, 5.2, 0.5, 10), f.dark, [0, 2.6, 0]);
+    H.armR.kid('orb', [1.2, -12.2, 0]).glow(ICO(2.3), FIRE).glow(ICO(1.4), FIRE2, [0, 0.4, 0]).glow(CN(1.3, 3.4, 5), FIRE, [0, 2.6, 0]);
+    H.armL.at(HND, [0, 0, -0.45], p => p.add(C(0.45, 0.45, 26, 5), DWOOD, [0, 3, 0]).add(CN(1.4, 2.6, 4), GOLD, [0, 16.2, 0], [PI, 0, 0]).glow(OCT(1.5), FIRE, [0, 18.6, 0], Z3, [1, 1.5, 1]));
+    pose(H, 'armR', { base: 1.1, walk: 0.12, atk: 0.9 }); pose(H, 'armL', { base: 0.45, walk: 0.1 });
+    H.anim.push({ n: 'orb', k: 'flick' });
+    return { root: H.root, anim: H.anim, scale: 1.0 };
+  },
+  priest(f) {
+    const W = '#eef0f4';
+    const H = body({ robe: W, hem: GOLD, shirt: W, belt: f.color, armX: cuff(W), torsoX: hair(f.dark).concat([{ a: [0, 6.7, 0], b: [0, 8.5, 0], ra: 3.7, rb: 2.0, sx: 0.8, c: f.color },
+      { a: [2.4, 5.6, 1.3], b: [3.1, -3.6, 1.5], ra: 0.75, sx: 0.4, c: f.color }, { a: [2.4, 5.6, -1.3], b: [3.1, -3.6, -1.5], ra: 0.75, sx: 0.4, c: f.color }]) });
+    H.head.glow(T(3.0, 0.32, 5, 16), '#ffe066', [0, 4.7, 0], [PI / 2, 0, 0]);
+    H.armR.at(HND, [0, 0, -0.45], p => p.add(C(0.45, 0.45, 28, 5), GOLD, [0, 4, 0]).glow(T(2.4, 0.4, 5, 12), '#ffe066', [0, 20.6, 0], [0, PI / 2, 0]).glow(S(1.2, 6, 5), '#fff6c8', [0, 20.6, 0]));
+    H.armL.glow(OCT(1), '#aef5c8', [1.6, -11.2, 0]);
+    pose(H, 'armR', { base: 0.45, walk: 0.1, atk: 0.7 }); pose(H, 'armL', { base: 0.9, walk: 0.15 });
+    return { root: H.root, anim: H.anim, scale: 0.98 };
+  },
+  // ---------- Механисты ----------
+  sniper(f) {
+    const COAT = '#4d5a4a';
+    const H = body({ shirt: COAT, pauldron: f.color, pants: '#3c4238', boots: DARK, glove: DARK, belt: DARK, torsoX: helm('#3c4238').concat([{ a: [0, 1.4, 0], b: [0, -3.8, 0], ra: 3.1, rb: 4.0, sx: 0.8, c: COAT },
+      { a: [0, 7.9, 0], b: [0, 9, 0], ra: 2.2, c: f.color }, { a: [-3.5, 3.4, 0], b: [-3.5, 6.6, 0], ra: 2.2, sx: 0.7, c: '#5d4a35' }]) });
+    H.torso.add(C(0.15, 0.15, 8, 4), DSTEEL, [-4.2, 11.6, 1.6]);
+    H.head.add(B(2.6, 0.45, 4.6), '#3c4238', [3.3, 1.35, 0]).glow(B(0.4, 0.8, 1.2), '#7ef0ff', [3.4, 0.45, 1.1]).glow(B(0.4, 0.8, 1.2), '#7ef0ff', [3.4, 0.45, -1.1]);
+    H.armR.at(HND, [0, 0, -1.4], p => p.add(B(5.5, 1.8, 1), WOOD, [-3, -0.4, 0]).add(B(8.5, 1.4, 1.2), DARK, [3.5, 0, 0]).add(C(0.36, 0.36, 17, 6), DSTEEL, [15.5, 0.2, 0], LAYX)
+      .add(C(0.65, 0.65, 2.4, 6), DARK, [23.5, 0.2, 0], LAYX).add(C(0.75, 0.75, 5.5, 6), DARK, [3.5, 1.7, 0], LAYX).glow(C(0.6, 0.6, 0.3, 6), '#7ef0ff', [6.4, 1.7, 0], LAYX)
+      .add(B(0.3, 4, 0.3), DSTEEL, [12, -2, 0.9], [0.3, 0, 0]).add(B(0.3, 4, 0.3), DSTEEL, [12, -2, -0.9], [-0.3, 0, 0]));
+    pose(H, 'armR', { base: 1.4, walk: 0.06, atk: 0.22 }); pose(H, 'armL', { base: 1.25, walk: 0.06, atk: 0.15 });
+    return { root: H.root, anim: H.anim, scale: 0.97 };
+  },
+  // ---------- Герои ----------
+  paladin(f) {
+    const H = body({ shirt: STEEL, front: '#eef2f6', pauldron: GOLD, pants: DSTEEL, shin: STEEL, boots: GOLD, glove: GOLD, belt: GOLD, cape: f.color, bulk: 1.12, arm: 1.15, torsoX: helm(STEEL, f.color) });
+    H.torso.add(B(0.5, 4.8, 1.2), GOLD, [3.45, 4.4, 0]).add(B(0.5, 1.2, 3.6), GOLD, [3.45, 5.3, 0]);
+    H.head.add(B(0.5, 2.2, 0.6), GOLD, [2.95, 0.9, 0]).add(B(0.5, 3.8, 1.8), '#f4f1e6', [-0.8, 2.6, 3.4], [-0.5, 0, 0.5]).add(B(0.5, 3.8, 1.8), '#f4f1e6', [-0.8, 2.6, -3.4], [0.5, 0, 0.5])
+      .glow(T(3.2, 0.3, 5, 16), '#ffe066', [0, 6.4, 0], [PI / 2, 0, 0]);
+    H.armL.at([1.9, -6.2, -0.6], Z3, p => shield(p, f));
+    H.armR.at(HND, Z3, p => p.add(C(0.6, 0.6, 17, 6), DWOOD, [6.5, 0, 0], LAYX).add(S(0.9, 6, 4), GOLD, [-2, 0, 0]).add(B(4.6, 8.4, 5), STEEL, [15, 0, 0]).add(B(5, 1.6, 5.4), GOLD, [15, 0, 0])
+      .glow(B(4.8, 0.7, 5.2), '#ffe9a0', [15, 4.5, 0]).glow(B(4.8, 0.7, 5.2), '#ffe9a0', [15, -4.5, 0]));
+    pose(H, 'armR', { base: 0.4, atk: 1.9 }); pose(H, 'armL', { base: 0.55, walk: 0.15 });
+    heroRing(H);
+    return { root: H.root, anim: H.anim, scale: 1.28 };
+  },
+  warlord(f) {
+    const SK = '#5f8a3e';
+    const H = body({ skin: SK, shirt: SK, bareArms: true, bulk: 1.3, arm: 1.5, pants: '#4a3a2a', pauldron: BONE, belt: f.color, jaw: 1.35, neck: 1.4, orc: 1.4,
+      torsoX: brow(SK).concat(helm(BONE), [{ a: [-1.8, 7.7, -2.8], b: [-1.8, 7.7, 2.8], ra: 2.7, c: HIDE }, { a: [3, 0.6, 0], b: [3.4, -3.8, 0], ra: 2.3, sx: 0.3, c: f.color },
+        { a: [3, 7, -2.6], b: [2.8, 2.6, 2.8], ra: 0.6, sx: 0.5, c: LEATHER }, { a: [3, 7, 2.6], b: [2.8, 2.6, -2.8], ra: 0.6, sx: 0.5, c: LEATHER }]) });
+    H.torso.add(S(1.3, 6, 4), BONE, [3.7, 4.8, 0]).add(C(0.45, 0.45, 24, 5), DWOOD, [-4.6, 13, 0]).add(B(0.4, 9, 7), f.color, [-4.6, 20, 3.8]).add(B(0.45, 1.2, 7.2), f.dark, [-4.6, 16, 3.8]).add(S(1.5, 6, 4), BONE, [-4.6, 25.8, 0]);
+    H.head.add(CN(1, 5.4, 5), BONE, [0, 3.4, 3.6], [0.9, 0, 0]).add(CN(1, 5.4, 5), BONE, [0, 3.4, -3.6], [-0.9, 0, 0]);
+    H.armR.at(HND, Z3, p => {
+      p.add(C(0.7, 0.7, 22, 6), DWOOD, [7, 0, 0], LAYX).add(CN(0.9, 3, 4), DSTEEL, [19.4, 0, 0], LAYX).add(B(1.8, 1.8, 1.8), f.color, [11.5, 0, 0]);
+      for (const s of [1, -1]) p.add(B(5, 6.5, 0.9), DSTEEL, [15.5, s * 3.6, 0]).add(B(6.4, 1.2, 0.6), '#eef2f6', [15.5, s * 7.2, 0]);
+    });
+    pose(H, 'armR', { base: 0.5, atk: 2.0 }); pose(H, 'armL', { base: 0.35 });
+    heroRing(H);
+    return { root: H.root, anim: H.anim, scale: 1.45 };
+  },
+  archmage(f) {
+    const ICE = '#9fd8ff';
+    const H = body({ robe: f.dark, hem: GOLD, shirt: f.color, pauldron: GOLD, belt: GOLD, cape: f.color, armX: cuff(f.color),
+      torsoX: wizhat(f.dark, GOLD, 9.5).concat(beard('#eeeae0', 5.6), [{ a: [0, 6.8, 0], b: [0, 8.5, 0], ra: 3.6, rb: 2.1, sx: 0.8, c: '#f1ecff' }]) });
+    H.head.add(C(5.6, 5.8, 0.5, 10), f.dark, [0, 2.6, 0]).glow(OCT(1.1), ICE, [3.1, 2.7, 0]);
+    H.armL.at(HND, [0, 0, -0.45], p => p.add(C(0.5, 0.5, 30, 5), GOLD, [0, 4, 0]).add(T(2.4, 0.5, 5, 10), GOLD, [0, 20.5, 0], [0, PI / 2, 0]).glow(OCT(2.1), ICE, [0, 20.5, 0], Z3, [1, 1.6, 1]));
+    H.armR.kid('orb', [1.2, -12.2, 0]).glow(ICO(2.5), ICE).glow(ICO(1.5), '#ffffff');
+    const orbit = H.torso.kid('orbit', [0, 17, 0]);
+    ring(3, 9, (x, z) => orbit.glow(OCT(1.3), ICE, [x, 0, z], Z3, [1, 1.7, 1]));
+    pose(H, 'armR', { base: 1.1, walk: 0.12, atk: 0.9 }); pose(H, 'armL', { base: 0.45, walk: 0.1 });
+    H.anim.push({ n: 'orb', k: 'flick' }, { n: 'orbit', k: 'spin', speed: 1.8 });
+    heroRing(H);
+    return { root: H.root, anim: H.anim, scale: 1.25 };
+  },
+});
 
 // ================= Здания =================
 const KIT = {
@@ -810,7 +1158,114 @@ function instance(key, build) {
   return m;
 }
 
+// ================= Готовые модели со скелетом (models/<воин>.json + .png) =================
+// Форма построена нейросетью по картинкам, цвет лежит в текстуре, вершины привязаны к костям.
+// Кости называются так же, как части у остальных воинов, поэтому движутся той же функцией animate().
+const SK = {};
+// scale — рост воина в игре, делённый на 1000
+const SK_CFG = { swordsman: { scale: 0.030 }, archer: { scale: 0.029 }, paladin: { scale: 0.038 }, berserker: { scale: 0.031 }, axethrower: { scale: 0.030 },
+  ogre: { scale: 0.052 }, warlord: { scale: 0.045 }, golem: { scale: 0.040 }, pyromancer: { scale: 0.030 }, priest: { scale: 0.029 }, archmage: { scale: 0.037 }, sniper: { scale: 0.029 } };
+export const SKINNED_UNITS = Object.keys(SK_CFG);
+// Манеры движения (стойка, ходьба, удар для разных видов оружия) — общий файл с проверочными скриптами
+let STYLES = {};
+export async function loadStyles() { STYLES = await fetch('models/styles.json').then(r => r.json()); }
+const HERO_RING = new THREE.MeshBasicMaterial({ color: GOLD });
+export async function loadSkinned(type) {
+  const [j, tex] = await Promise.all([
+    fetch(`models/${type}.json`).then(r => { if (!r.ok) throw new Error('models/' + type + '.json: ' + r.status); return r.json(); }),
+    new THREE.TextureLoader().loadAsync(`models/${type}.png`)]);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const n = j.v.length / 3, geo = new THREE.BufferGeometry(), si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) { si[i * 4] = j.si[i * 2]; si[i * 4 + 1] = j.si[i * 2 + 1]; sw[i * 4] = j.sw[i * 2] / 255; sw[i * 4 + 1] = j.sw[i * 2 + 1] / 255; }
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(j.v, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(j.uv.map(v => v / 4095), 2));
+  geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+  geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+  geo.setIndex(j.f); geo.computeVertexNormals();
+  // гладкая поверхность: на швах развёртки вершины раздвоены, поэтому нормали усредняются по совпадающим точкам
+  { const P = geo.attributes.position.array, N = geo.attributes.normal.array, acc = new Map();
+    for (let i = 0; i < n; i++) { const k = P[i * 3] + '_' + P[i * 3 + 1] + '_' + P[i * 3 + 2]; let a = acc.get(k); if (!a) acc.set(k, a = [0, 0, 0]); a[0] += N[i * 3]; a[1] += N[i * 3 + 1]; a[2] += N[i * 3 + 2]; }
+    for (let i = 0; i < n; i++) { const a = acc.get(P[i * 3] + '_' + P[i * 3 + 1] + '_' + P[i * 3 + 2]), l = Math.hypot(a[0], a[1], a[2]) || 1; N[i * 3] = a[0] / l; N[i * 3 + 1] = a[1] / l; N[i * 3 + 2] = a[2] / l; } }
+  // снаряжение (меч, щит): отдельные жёсткие предметы, каждый целиком сидит на одной кости и не деформируется
+  let gear = null;
+  if (j.gear && j.gear.v.length) {
+    const m = j.gear.v.length / 3, gi = new Uint16Array(m * 4), gw = new Float32Array(m * 4), col = new Float32Array(m * 3), c = new THREE.Color();
+    for (let i = 0; i < m; i++) {
+      gi[i * 4] = j.gear.b[i]; gw[i * 4] = 1;
+      c.setRGB(j.gear.c[i * 3] / 255, j.gear.c[i * 3 + 1] / 255, j.gear.c[i * 3 + 2] / 255, THREE.SRGBColorSpace);
+      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    }
+    gear = new THREE.BufferGeometry();
+    gear.setAttribute('position', new THREE.Float32BufferAttribute(j.gear.v, 3));
+    gear.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    gear.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(gi, 4));
+    gear.setAttribute('skinWeight', new THREE.Float32BufferAttribute(gw, 4));
+    gear.computeVertexNormals();
+  }
+  SK[type] = { geo, gear, rig: j.rig, style: j.style, bones: j.bones, mat: new THREE.MeshLambertMaterial({ map: tex }),
+    flash: new THREE.MeshLambertMaterial({ map: tex, emissive: '#ffffff', emissiveIntensity: 0.3 }) };
+}
+// Движения человечка со скелетом. Те же формулы — в C:\AI\h3d.py (для проверки вне игры), числа — в models/styles.json.
+// ph — фаза шага, mv — 0..1 идёт ли; удар проигрывается по своим часам: замах, удар, возврат.
+const ARM_BONES = ['torso', 'armR_up', 'armR_low', 'armL_up', 'armL_low'], Z0 = [0, 0, 0], LIFT_Q = new THREE.Quaternion(), AXIS_Z = new THREE.Vector3(0, 0, 1);
+function humanoidPose(st, e, t, dt) {
+  const S = st.style || STYLES[st.rig] || {}, B = st.bn, mv = st.mv, s = Math.sin(st.ph), c = Math.cos(st.ph), br = Math.sin(t * 2.2 + (e.id || 0)) * 0.012;
+  const swing = e.swing || 0;
+  if (swing > (st.lastSw || 0) + 0.01) st.atk = 0; // начался новый удар
+  st.lastSw = swing;
+  let k = 0;
+  if (st.atk !== undefined && st.atk < 1) {
+    const a = st.atk = Math.min(1, st.atk + dt / (S.dur || 0.45));
+    k = a < 0.3 ? a / 0.3 : a < 0.55 ? 1 - (a - 0.3) / 0.25 * 1.4 : -0.4 * (1 - (a - 0.55) / 0.45);
+  }
+  const up = Math.max(0, k), dn = Math.min(0, k), lunge = (S.lunge || 0) * (1 - mv);
+  if (B.legR_up) { // у магов в мантии ног нет
+    B.legR_up.rotation.set(0, 0, 0.55 * s * mv - 0.6 * dn * lunge);
+    B.legL_up.rotation.set(0, 0, -0.55 * s * mv + 0.35 * dn * lunge);
+    B.legR_low.rotation.set(0, 0, -0.75 * Math.max(0, c) * mv);
+    B.legL_low.rotation.set(0, 0, -0.75 * Math.max(0, -c) * mv);
+  }
+  B.head.rotation.set(0, -0.06 * s * mv, -br);
+  for (const n of ARM_BONES) {
+    const q = S[n] || {}, b = q.b || Z0, w = q.w || Z0, u = q.up || Z0, d = q.dn || Z0, m = s * mv;
+    const y = b[1] + w[1] * m + u[1] * up + d[1] * dn, z = b[2] + w[2] * m + u[2] * up + d[2] * dn;
+    B[n].rotation.set(b[0] + w[0] * m + u[0] * up + d[0] * dn, n === 'torso' ? y + 0.10 * m : y, n === 'torso' ? z - 0.05 * mv + br : z);
+    // l — подъём всей руки вокруг линии плеч: обе руки поворачиваются на один угол, и оружие в двух руках идёт как одно целое
+    if (q.l) B[n].quaternion.premultiply(LIFT_Q.setFromAxisAngle(AXIS_Z, q.l[0] * m + q.l[1] * up + q.l[2] * dn));
+  }
+}function skinned(type) {
+  const d = SK[type], cfg = SK_CFG[type], g = new THREE.Group(), by = {};
+  g.name = 'model'; g.scale.setScalar(cfg.scale);
+  const bones = d.bones.map(b => { const o = new THREE.Bone(); o.name = b.n; by[b.n] = o; return o; });
+  d.bones.forEach((b, i) => {
+    const par = b.parent ? d.bones.find(q => q.n === b.parent) : null;
+    bones[i].position.set(b.p[0] - (par ? par.p[0] : 0), b.p[1] - (par ? par.p[1] : 0), b.p[2] - (par ? par.p[2] : 0));
+    (par ? by[b.parent] : g).add(bones[i]);
+  });
+  const mesh = new THREE.SkinnedMesh(d.geo, d.mat);
+  mesh.castShadow = mesh.receiveShadow = true; mesh.frustumCulled = false; // границы считаются по позе покоя, а воин движется
+  mesh.userData.matBase = d.mat; mesh.userData.matFlash = d.flash;
+  g.add(mesh);
+  let gm = null;
+  if (d.gear) {
+    gm = new THREE.SkinnedMesh(d.gear, LIT);
+    gm.castShadow = gm.receiveShadow = true; gm.frustumCulled = false;
+    g.add(gm);
+  }
+  if (UNITS[type] && UNITS[type].hero) { // золотой круг под героем
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(10 / cfg.scale, 0.45 / cfg.scale, 4, 24), HERO_RING);
+    ring.rotation.x = PI / 2; ring.position.y = 0.7 / cfg.scale; g.add(ring);
+  }
+  g.updateMatrixWorld(true);
+  const sk = new THREE.Skeleton(bones);
+  mesh.bind(sk); if (gm) gm.bind(sk);
+  g.userData = { h: 1000 * cfg.scale, mv: 0, ph: Math.random() * 6, rate: 9, rig: d.rig, style: d.style, bn: by,
+    anim: (cfg.anim || []).map(a => { const o = by[a.n]; return { ...a, o, x0: o.position.x, y0: o.position.y }; }) };
+  return g;
+}
+
 export function makeUnit(type, facKey, fac, speed) {
+  if (SK[type]) { const sm = skinned(type); sm.userData.rate = 4 + speed * 0.075; return sm; }
   const m = instance(type + '|' + facKey, () => U[type](fac));
   m.userData.rate = 4 + speed * 0.075;
   return m;
@@ -826,6 +1281,7 @@ export function makeProp(kind, facKey, fac) { return instance('prop|' + kind + '
 export function animate(m, e, t, dt) {
   const st = m.userData, unit = e.kind === 'unit';
   if (unit) { st.mv += ((e.moving ? 1 : 0) - st.mv) * Math.min(1, dt * 10); if (e.moving) st.ph += dt * st.rate; }
+  if (st.rig) { humanoidPose(st, e, t, dt); return; }
   const s = unit ? Math.max(0, Math.min(1, e.swing / 0.25)) : Math.max(0, Math.min(1, e.fire / 0.3));
   const sw = Math.sin(s * PI), wk = Math.sin(st.ph) * st.mv;
   for (const a of st.anim) {

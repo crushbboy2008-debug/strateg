@@ -1,7 +1,7 @@
 // ---------- 3D-отрисовка (Three.js), камера, ввод и интерфейс ----------
 import * as THREE from '../lib/three.module.js';
 import { createEnvironment, buildTerrain, groundPatch } from './world.js';
-import { makeUnit, makeBuilding, makeObstacles, makeDecor, makeProp, makeProj, animate, LIT, FLASH } from './models.js';
+import { makeUnit, makeBuilding, makeObstacles, makeDecor, makeProp, makeProj, animate, loadSkinned, loadStyles, SKINNED_UNITS, LIT, FLASH } from './models.js';
 import { createEffects } from './effects.js';
 import { portrait } from './portraits.js';
 
@@ -143,7 +143,11 @@ function syncEnts(t, dt) {
     const fo = e.flash > 0, fl = fo ? 1.05 : 1;
     if (fo !== !!ud.flashOn) { // вспышка при попадании: на мгновение подсвечиваем модель белым
       ud.flashOn = fo;
-      ud.model.traverse(o => { if (o.isMesh && (o.material === LIT || o.material === FLASH)) o.material = fo ? FLASH : LIT; });
+      ud.model.traverse(o => {
+        if (!o.isMesh) return;
+        if (o.material === LIT || o.material === FLASH) o.material = fo ? FLASH : LIT;
+        else if (o.userData.matFlash) o.material = fo ? o.userData.matFlash : o.userData.matBase; // модель с текстурой
+      });
     }
     if (e.kind === 'unit') {
       const want = -e.face;
@@ -1056,6 +1060,9 @@ function frame(ts) {
 // Фон меню: пустая карта с медленным облётом
 UI.cam.x = WORLD.w / 2; UI.cam.y = WORLD.h / 2; UI.cam.dist = 1500;
 window.GameDebug = { THREE, scene, camera, renderer, possess, unpossess, groundAt, toScreen, entMesh };
+// Готовые модели со скелетом; если файл не загрузился, воин останется прежним, собранным из фигур
+await loadStyles().catch(e => console.warn('Манеры движения не загружены:', e.message));
+await Promise.all(SKINNED_UNITS.map(t => loadSkinned(t).catch(e => console.warn('Модель не загружена:', t, e.message))));
 previewMap();
 buildMenu();
 resize();
