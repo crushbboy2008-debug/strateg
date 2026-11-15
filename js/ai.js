@@ -16,10 +16,10 @@ function botUpdate(p, dt) {
   let want = null;
   if (!cnt.barracks) want = 'barracks';
   else if (cnt.mine < Math.min(2 + Math.floor(t / 50), 7)) want = 'mine';
-  else if (cnt.tower < Math.min(1 + Math.floor(t / 80), 5)) want = p.fac.tower;
-  else if (cnt.barracks < Math.min(1 + Math.floor(t / 140), 3)) want = 'barracks';
+  else if (cnt.tower < Math.min(1 + Math.floor(t / 80), MAX_TOWERS)) want = p.fac.tower;
+  else if (cnt.barracks < Math.min(1 + Math.floor(t / 140), 3) + (p.gold > 900 ? 2 : 0)) want = 'barracks';
   // Герой важнее новых построек: как только есть казарма и пара шахт, бот копит на него
-  const needHero = !p.heroU && !p.hq.queue.length && t > 45 && cnt.barracks && cnt.mine >= 2;
+  const needHero = !p.heroU && !p.hq.queue.length && t > 45 && t >= p.heroBack - 12 && cnt.barracks && cnt.mine >= 2;
   const upKey = ['eco', 'atk', 'arm'].sort((a, b) => p.up[a] - p.up[b])[0];
   const needUp = !needHero && !p.research && p.up[upKey] < UPGRADES[upKey].cost.length && t > 110 + 75 * (p.up.atk + p.up.arm + p.up.eco);
   if (needHero || needUp) want = null;
@@ -53,7 +53,7 @@ function botUpdate(p, dt) {
   // --- Атака волнами ---
   const foes = G.players.filter(q => q.alive && q.team !== p.team);
   if (!foes.length) return;
-  if (home.length >= ai.wave) {
+  if (home.length >= ai.wave || (home.length >= 8 && popOf(p) >= POP_CAP - 3)) { // войско набрано или упёрлись в лимит — идём всем, что есть
     foes.sort((a, b) => dist(a.hq, p.hq) - dist(b.hq, p.hq));
     const foe = Math.random() < 0.7 ? foes[0] : foes[Math.floor(Math.random() * foes.length)];
     home.forEach((u, i) => {
@@ -61,7 +61,7 @@ function botUpdate(p, dt) {
       const a = i * 2.4, rr = 16 * Math.sqrt(i);
       orderUnit(u, 'amove', foe.hq.x + Math.cos(a) * rr, foe.hq.y + Math.sin(a) * rr);
     });
-    ai.wave = Math.min(ai.wave + 2, 22);
+    ai.wave = Math.min(ai.wave + 2, 34);
   }
   // Воины волны, оставшиеся без дела, идут добивать ближайшее вражеское здание
   for (const u of mine) {

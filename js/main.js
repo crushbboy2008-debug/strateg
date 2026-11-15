@@ -1,7 +1,7 @@
 // ---------- 3D-отрисовка (Three.js), камера, ввод и интерфейс ----------
 import * as THREE from '../lib/three.module.js';
 import { createEnvironment, buildTerrain, groundPatch } from './world.js';
-import { makeUnit, makeBuilding, makeObstacles, makeDecor, makeProp, makeProj, animate, loadSkinned, loadStyles, SKINNED_UNITS, LIT, FLASH } from './models.js';
+import { makeUnit, makeBuilding, makeObstacles, makeDecor, makeBaseWalls, makeProp, makeProj, animate, loadSkinned, loadStyles, SKINNED_UNITS, LIT, FLASH } from './models.js';
 import { createEffects } from './effects.js';
 import { portrait } from './portraits.js';
 
@@ -90,11 +90,13 @@ function buildUnit(u) { const p = G.players[u.owner]; return wrap(u, makeUnit(u.
 function buildBld(e) { const p = G.players[e.owner], g = wrap(e, makeBuilding(e.type, p.faction, p.fac), e.r * 0.95); g.add(groundPatch(e.r)); return g; }
 
 let natureGroups = [], propMeshes = [];
-function buildObstacles() {
+// bases — где стоят цитадели: [{ x, y, fac, f }]; в бою это игроки, в меню — одна показная база
+function buildObstacles(bases = G.players.map(p => ({ x: p.hq.x, y: p.hq.y, fac: p.faction, f: p.fac }))) {
   for (const g of natureGroups) { scene.remove(g); g.traverse(o => { if (o.isMesh) o.geometry.dispose(); }); }
   for (const m of propMeshes) scene.remove(m.g);
-  const avoid = G.obstacles.concat(G.players.map(p => ({ x: p.hq.x, y: p.hq.y, r: 78 })), G.props.filter(q => q.r).map(q => ({ x: q.x, y: q.y, r: q.r + 6 })));
-  natureGroups = [makeObstacles(G.obstacles, G.map), makeDecor(WORLD.w, WORLD.h, avoid, G.map)];
+  const avoid = G.obstacles.concat(bases.map(b => ({ x: b.x, y: b.y, r: 78 })), G.props.filter(q => q.r).map(q => ({ x: q.x, y: q.y, r: q.r + 6 })));
+  natureGroups = [makeObstacles(G.obstacles, G.map), makeDecor(WORLD.w, WORLD.h, avoid, G.map),
+    makeBaseWalls(bases, WORLD.w, WORLD.h)]; // крепостные стены за базами — только украшение
   scene.add(...natureGroups);
   // убранство баз: отдельные модели, чтобы их можно было убрать при застройке
   propMeshes = G.props.map(q => {
@@ -107,14 +109,55 @@ function buildObstacles() {
 function syncProps(t, dt) {
   for (const m of propMeshes) {
     if (m.q.dead) m.g.visible = false;
-    else if (m.g.userData.anim.length) animate(m.g, m.q, t, dt);
+    else if (m.q.kind === 'unit' || m.g.userData.anim.length) animate(m.g, m.q, t, dt);
   }
 }
-// Фон меню под выбранную карту
+// Фон меню: база выбранной фракции на выбранной карте — цитадель, постройки, отряд у ворот и стена за спиной.
+// Это только картинка: в симуляцию ничего не попадает, модели лежат рядом с убранством и убираются вместе с ним.
+let menuBase = null;
 function previewMap() {
-  G.map = MAPS[UI.menu.map]; WORLD.w = WORLD.h = G.map.size;
-  Object.assign(G, { running: false, ents: [], units: [], blds: [], projs: [], fx: [], parts: [], obstacles: [], props: [], players: [] });
-  clearScene(); setTerrain([]); buildObstacles();
+  const map = G.map = MAPS[UI.menu.map], W = WORLD.w = WORLD.h = map.size;
+  Object.assign(G, { running: false, ents: [], units: [], blds: [], projs: [], fx: [], parts: [], obstacles: [], props: [], players: [], nextId: 1 });
+  G.seed = G.seed || [Math.random() * 100, Math.random() * 100];
+  const fk = UI.menu.faction, f = FACTIONS[fk];
+  // база в том углу (или у той стороны), где солнце освещает её со стороны камеры
+  const x = map.lay === 'cross' ? W / 2 : 480, y = 480, a = Math.atan2(W / 2 - y, W / 2 - x);
+  menuBase = { x, y, a };
+  baseDecor({ faction: fk, idx: 0 }, x, y, a);
+  for (let tries = 0; G.obstacles.length < map.obst && tries < 9000; tries++) {
+    const o = { x: rand(80, W - 80), y: rand(80, W - 80), r: rand(22, 44), tree: Math.random() < map.treeP, seed: Math.random() };
+    if (o.tree) o.kind = map.trees[Math.floor(Math.random() * map.trees.length)]; else { o.kind = 'rock'; o.r *= map.rockMul || 1; }
+    if (Math.hypot(o.x - x, o.y - y) < 540 || G.obstacles.some(q => dist(o, q) < o.r + q.r + (map.gap || 90))) continue;
+    G.obstacles.push(o);
+  }
+  clearScene(); setTerrain([{ x, y, ground: BASE_GROUND[fk] }]);
+  G.obstacles = G.obstacles.filter(o => terrain.roadDist(o.x, o.y) > o.r + 48);
+  const at = (b, d) => [x + Math.cos(a + b) * d, y + Math.sin(a + b) * d];
+  const blds = [['hq', 0, 0], ['barracks', 1.32, 205], ['mine', -1.32, 205], [f.tower, -0.72, 285]].map(([t, b, d]) => ({ t, p: at(b, d), r: BUILDINGS[t].r }));
+  for (const q of G.props) if (q.r && blds.some(b => Math.hypot(q.x - b.p[0], q.y - b.p[1]) < b.r + q.r + 14)) q.dead = true;
+  buildObstacles([{ x, y, fac: fk, f }]);
+  const put = (g, p, rot, q) => { g.position.set(p[0], g.position.y, p[1]); g.rotation.y = rot; scene.add(g); propMeshes.push({ g, q }); };
+  for (const b of blds) {
+    put(makeBuilding(b.t, fk, f), b.p, Math.PI / 2 - a, { kind: 'bld', id: 1, fire: 0, aim: a, dead: false });
+    const patch = groundPatch(b.r); patch.userData.anim = [];
+    patch.position.set(b.p[0], 0.35, b.p[1]); scene.add(patch); propMeshes.push({ g: patch, q: { dead: false } });
+  }
+  // отряд перед воротами: герой впереди, воины в ряд за ним
+  const row = [[f.hero, 150, 0], ...[-1.5, -0.5, 0.5, 1.5].map((k, i) => [f.units[i % 2], 108, k * 0.3])];
+  row.forEach(([t, d, b], i) => put(makeUnit(t, fk, f, UNITS[t].speed), at(b, d), -a, { kind: 'unit', id: i + 2, type: t, swing: 0, moving: false, fire: 0, dead: false }));
+  drawMapPrev();
+}
+// Картинка карты в меню: вид сверху и места четырёх баз
+function drawMapPrev() {
+  const cv = $('mapPrev'), g = cv.getContext('2d'), s = cv.width, m = 480 / WORLD.w * s;
+  g.drawImage(terrain.mini, 0, 0, s, s);
+  const spots = G.map.lay === 'cross' ? [[s / 2, s - m], [s / 2, m], [m, s / 2], [s - m, s / 2]] : [[m, s - m], [s - m, m], [m, m], [s - m, s - m]];
+  for (const [x, y] of spots) {
+    g.save(); g.translate(x, y); g.rotate(Math.PI / 4);
+    g.fillStyle = '#17171b'; g.fillRect(-9, -9, 18, 18);
+    g.fillStyle = '#f0dfae'; g.fillRect(-6, -6, 12, 12);
+    g.restore();
+  }
 }
 
 // ================= Синхронизация сцены с симуляцией =================
@@ -292,9 +335,9 @@ function updateCamera(dt) {
   } else {
     const p = 0.92; // наклон RTS-камеры
     if (G.running) { wantPos.set(c.x, c.dist * Math.sin(p), c.y + c.dist * Math.cos(p)); wantLook.set(c.x, 0, c.y); }
-    else { // в меню камера медленно облетает остров
-      const a = performance.now() * 0.00004;
-      wantPos.set(WORLD.w / 2 + Math.cos(a) * 2700, 850, WORLD.h / 2 + Math.sin(a) * 2700); wantLook.set(WORLD.w / 2, 0, WORLD.h / 2);
+    else if (menuBase) { // в меню камера стоит перед базой и медленно покачивается из стороны в сторону
+      const b = menuBase, a = b.a + Math.sin(performance.now() * 0.00011) * 0.2;
+      wantPos.set(b.x + Math.cos(a) * 640, 300, b.y + Math.sin(a) * 640); wantLook.set(b.x + Math.cos(b.a) * 40, -30, b.y + Math.sin(b.a) * 40);
     }
   }
   const k = camSnap ? 1 : 1 - Math.exp(-dt * (u ? 16 : 12));
@@ -446,16 +489,16 @@ function menuSet(key, v) {
   UI.menu[key] = v;
   if (Net.role === 'host') Net.setLobby({ [key]: v });
   buildMenu();
-  if (key === 'map' && !G.running) previewMap();
+  if ((key === 'map' || key === 'faction') && !G.running) previewMap();
 }
 Net.on.lobby = () => {
-  const L = Net.lobby, M = UI.menu, N = UI.net, mapWas = M.map;
+  const L = Net.lobby, M = UI.menu, N = UI.net, mapWas = M.map, facWas = M.faction;
   N.busy = false; N.msg = '';
   if (Net.role === 'client') { M.map = L.map; M.diff = L.diff; N.coop = L.coop; if (L.slots[Net.you]) M.faction = L.slots[Net.you].faction; }
   else M.faction = L.slots[0].faction;
   M.bots = L.bots;
   buildMenu();
-  if (M.map !== mapWas && !G.running) previewMap();
+  if ((M.map !== mapWas || M.faction !== facWas) && !G.running) previewMap();
 };
 Net.on.start = m => startGame(m);
 Net.on.end = () => { if (G.net === 'client' && G.running) { G.over = G.over || 'ended'; toMenu(); UI.net.msg = 'Хост завершил бой'; buildMenu(); } };
@@ -523,25 +566,30 @@ function buildMenu() {
   for (const k in FACTIONS) {
     const f = FACTIONS[k], d = document.createElement('div');
     const taken = !!L && L.slots.some((q, i) => i !== you && q.faction === k);
-    d.className = 'card' + (UI.menu.faction === k ? ' sel' : '') + (taken ? ' taken' : '');
+    d.className = 'fac' + (UI.menu.faction === k ? ' sel' : '') + (taken ? ' taken' : '');
     d.style.setProperty('--c', f.color);
-    const fig = (kind, t, name) => `<figure><img src="${portrait(kind, t, k)}" alt=""><figcaption>${name}</figcaption></figure>`;
-    d.innerHTML = `<img class="hqImg" src="${portrait('bld', 'hq', k)}" alt=""><h3>${f.name}</h3><p>${f.motto}</p>
-      <div class="heroRow"><img src="${portrait('unit', f.hero, k)}" alt=""><div><b>${UNITS[f.hero].name}</b><span>герой · ${UNITS[f.hero].abil.name}</span></div></div>
-      <div class="urow">${f.units.map(u => fig('unit', u, UNITS[u].name)).join('')}${fig('bld', f.tower, BUILDINGS[f.tower].name)}</div>`;
+    d.innerHTML = `<img src="${portrait('bld', 'hq', k)}" alt=""><span><b>${f.name}</b><small>Герой — ${UNITS[f.hero].name}</small></span>`;
     if (taken) d.insertAdjacentHTML('beforeend', '<span class="takenTag">занято</span>');
     else d.onclick = () => menuSet('faction', k);
     fc.appendChild(d);
   }
-  const mc = $('mapCards');
+  // подпись к базе на фоне: выбранная фракция, её девиз и войско
+  const fk = UI.menu.faction, sf = FACTIONS[fk], info = $('facInfo');
+  const fig = (kind, t, name, tag, cls) => `<figure${cls ? ` class="${cls}"` : ''}><img src="${portrait(kind, t, fk)}" alt=""><figcaption>${name}<i>${tag}</i></figcaption></figure>`;
+  info.style.setProperty('--c', sf.color);
+  info.innerHTML = `<h2>${sf.name}</h2><p>${sf.motto}</p><div class="roster">${fig('unit', sf.hero, UNITS[sf.hero].name, 'герой', 'hero')}
+    ${sf.units.map(u => fig('unit', u, UNITS[u].name, 'воин')).join('')}${fig('bld', sf.tower, BUILDINGS[sf.tower].name, 'башня')}</div>`;
+  const mc = $('mapCards'), sizeName = m => m.size < 3000 ? 'Малая' : m.size < 4000 ? 'Средняя' : 'Большая';
   mc.innerHTML = '';
   for (const k in MAPS) {
     const m = MAPS[k], b = document.createElement('button');
     b.className = 'mapc' + (UI.menu.map === k ? ' sel' : '');
-    b.innerHTML = `<i style="background:linear-gradient(135deg, ${m.thumb[0]} 0 55%, ${m.thumb[1]} 55% 82%, ${m.thumb[2]} 82%)"></i><span><b>${m.name}</b><small>${m.info}</small></span>`;
+    b.innerHTML = `<b>${m.name}</b><small>${sizeName(m)}</small>`;
     b.onclick = () => menuSet('map', k);
     mc.appendChild(b);
   }
+  const sm = MAPS[UI.menu.map];
+  $('mapInfo').innerHTML = `<b>${sm.name}</b><p>${sm.info}</p><small>${sizeName(sm)} · базы ${sm.lay === 'cross' ? 'у середин сторон' : 'по углам'}</small>`;
   const seg = (el, opts, key) => {
     el.innerHTML = '';
     for (const [v, label] of opts) {
@@ -573,15 +621,15 @@ function unitTip(t) {
 }
 function bldTip(t) {
   const d = BUILDINGS[t];
-  return `<b>${d.name}</b><div class="tc">${COIN}${buildCost(me(), t)} · стройка ${d.time} с</div>
+  return `<b>${d.name}</b><div class="tc">${COIN}${buildCost(me(), t)} · стройка ${d.time} с${d.tower ? ' · построено ' + countB(me(), t) + ' из ' + MAX_TOWERS : ''}</div>
     <div class="ts">Прочность ${d.hp}${d.dmg ? ` · Урон ${d.dmg} · Зона ${d.range}` : ''}</div><p>${d.info}</p>`;
 }
 
 function heroTip() {
   const p = me(), d = UNITS[p.fac.hero], a = d.abil, alive = p.heroU && !p.heroU.dead;
-  return `<b>${d.name} <span class="lv">★ ${p.heroLvl}</span></b><div class="tc">${alive ? 'В строю · клик — выбрать' : COIN + heroCost(p) + (p.heroDeaths ? ' · возрождение ' : ' · призыв ') + d.time + ' с'}</div>
-    <div class="ts">Здоровье ${unitMaxHp(p, p.fac.hero)} · Урон ${Math.round(d.dmg * (1 + 0.15 * p.up.atk) * (1 + 0.14 * (p.heroLvl - 1)))} · ${d.proj ? 'Дальность ' + d.range : 'Ближний бой'}</div>
-    <p>${d.info}</p><p><b>${a.name}</b> (раз в ${a.cd} с). ${a.info}</p><p>Клавиша <b>V</b> — применить способность (метеор и ракеты — затем клик по цели). <b>Shift+V</b> — разрешить или запретить герою применять её самому.</p><p>Набирает опыт в боях рядом с собой, до ${HERO_MAX}-го уровня. Уровень сохраняется после гибели.</p>`;
+  return `<b>${d.name} <span class="lv">★ ${p.heroLvl}</span></b><div class="tc">${alive ? 'В строю · клик — выбрать' : COIN + heroCost(p) + (p.heroDeaths ? ' · возрождение ' : ' · призыв ') + d.time + ' с' + (G.time < p.heroBack ? ' · доступен через ' + Math.ceil(p.heroBack - G.time) + ' с' : '')}</div>
+    <div class="ts">Здоровье ${unitMaxHp(p, p.fac.hero)} · Урон ${Math.round(d.dmg * (1 + 0.15 * p.up.atk) * (1 + HERO_DMG * (p.heroLvl - 1)))} · ${d.proj ? 'Дальность ' + d.range : 'Ближний бой'}</div>
+    <p>${d.info}</p><p><b>${a.name}</b> (раз в ${a.cd} с). ${a.info}</p><p>Клавиша <b>V</b> — применить способность (метеор и ракеты — затем клик по цели). <b>Shift+V</b> — разрешить или запретить герою применять её самому.</p><p>Набирает опыт в боях рядом с собой, до ${HERO_MAX}-го уровня. Уровень сохраняется после гибели, но вернуть павшего героя можно не сразу: от ${heroDelay(1)} с на 1-м уровне до ${heroDelay(HERO_MAX)} с на ${HERO_MAX}-м.</p>`;
 }
 function upTip(k) {
   const p = me(), d = UPGRADES[k], lvl = p.up[k], max = lvl >= d.cost.length;
@@ -687,7 +735,7 @@ function hudTick(dt) {
   $('gold').textContent = Math.floor(p.gold);
   $('inc').textContent = '+' + p.income.toFixed(0) + '/с';
   $('pop').textContent = popOf(p) + ' / ' + POP_CAP;
-  $('clock').textContent = fmtTime(G.time);
+  $('clock').textContent = fmtTime(G.time) + (G.time > SIEGE_START ? ' · осада ×' + siegeMul(G.time).toFixed(1) : '');
   for (const q of G.players) if (q.idx !== G.human) {
     const el = $('foe' + q.idx);
     el.classList.toggle('dead', !q.alive);
@@ -696,7 +744,8 @@ function hudTick(dt) {
   buildEls.forEach((el, i) => {
     const t = buildDefs[i], c = buildCost(p, t);
     el.querySelector('em').textContent = c;
-    el.classList.toggle('off', p.gold < c);
+    // !! обязательно: у шахты и казармы поля tower нет, а toggle с undefined просто переключает класс на каждом тике — кнопка мигала
+    el.classList.toggle('off', p.gold < c || !!(BUILDINGS[t].tower && countB(p, t) >= MAX_TOWERS));
     el.classList.toggle('active', UI.placing === t);
   });
   const queued = {}, prog = {};
@@ -716,10 +765,11 @@ function hudTick(dt) {
   });
   const hu = p.heroU && !p.heroU.dead ? p.heroU : null, hq = p.hq, hc = heroCost(p);
   heroEl.querySelector('em').textContent = hc;
-  heroEl.querySelector('.q').textContent = hu || p.heroDeaths ? '★' + p.heroLvl : '';
+  const hw = !hu && G.time < p.heroBack ? Math.ceil(p.heroBack - G.time) : 0;
+  heroEl.querySelector('.q').textContent = hw ? hw + ' с' : hu || p.heroDeaths ? '★' + p.heroLvl : '';
   heroEl.querySelector('.prog i').style.width = (hu ? hu.hp / hu.maxHp : hq.queue.length ? hq.trainT / UNITS[hq.queue[0]].time : 0) * 100 + '%';
   heroEl.classList.toggle('have', !!hu);
-  heroEl.classList.toggle('off', !hu && !hq.queue.length && p.gold < hc);
+  heroEl.classList.toggle('off', !hu && !hq.queue.length && (p.gold < hc || hw > 0));
   for (const k in upEls) {
     const el = upEls[k], d = UPGRADES[k], lvl = p.up[k], max = lvl >= d.cost.length, busy = p.research && p.research.key === k;
     el.querySelectorAll('.pips i').forEach((pi, i) => pi.classList.toggle('on', i < lvl));
@@ -965,7 +1015,7 @@ function toMenu() {
   if (Net.role === 'host') Net.finish(); // бой окончен для всех, комната остаётся
   else if (Net.role === 'client' && G.running && !G.over) { Net.leave(); UI.net.msg = 'Вы вышли из комнаты'; } // уход посреди боя — выход из комнаты
   G.running = false; UI.paused = false;
-  buildMenu();
+  previewMap(); buildMenu();
   if (document.pointerLockElement) document.exitPointerLock();
   for (const id of SCREENS) $(id).classList.add('hidden');
   $('hud').classList.add('hidden'); $('menu').classList.remove('hidden');

@@ -1142,6 +1142,163 @@ const PROPS = {
   },
 };
 
+// ================= Крепостные стены за базой =================
+// Только украшение: стоят на песке за границей поля, поэтому не мешают ни ходить, ни строить.
+// У каждой фракции: run — полотно стены (тянется вдоль +X, s — в какую сторону по Z смотрит база),
+// bay — убранство между башнями, tower — башня, keep — главная башня (в углу карты или за спиной базы, лицом +Z к базе).
+const fire = (p, x, y, z, k = 1) => p.glow(CN(4 * k, 12 * k, 6), FIRE, [x, y + 6 * k, z]).glow(CN(2.6 * k, 8 * k, 5), FIRE2, [x + k, y + 4 * k, z + 0.6 * k]);
+const WALLS = {
+  legion: {
+    run(q, len, s, f, K) {
+      q.add(B(len, 5, 18), K.wall2, [len / 2, 2.5, 0]).add(B(len, 19, 12), K.wall, [len / 2, 13, 0]).add(B(len, 2, 15), K.wall2, [len / 2, 23.5, 0]);
+      for (let x = 5; x < len; x += 11) q.add(B(6, 5, 3.4), K.wall, [x, 27, -s * 5.6]);
+      for (let x = 27; x < len; x += 54) q.add(B(6, 17, 6), K.wall2, [x, 8.5, s * 8]).add(B(6, 3, 8), K.wall, [x, 18.5, s * 7]);
+    },
+    bay(q, s, f) {
+      q.add(B(19, 1.2, 1.2), DWOOD, [0, 22, s * 7]).add(B(15, 16, 0.6), f.color, [0, 13.4, s * 6.8]).add(B(15, 1.6, 0.7), GOLD, [0, 6.4, s * 6.8]).add(B(4.4, 4.4, 0.7), GOLD, [0, 14.5, s * 7], [0, 0, PI / 4]);
+      for (const x of [-13, 13]) { q.add(C(0.5, 0.5, 6, 5), DWOOD, [x, 17, s * 7.4], [s * 0.5, 0, 0]); fire(q, x, 19, s * 9, 0.38); }
+    },
+    tower(t, s, f, K, end) {
+      t.add(C(13, 15, 44, 8), K.wall, [0, 22, 0], [0, PI / 8, 0]).add(C(15.5, 15.5, 3, 8), K.wall2, [0, 45.5, 0], [0, PI / 8, 0]).add(C(16, 17, 5, 8), K.wall2, [0, 2.5, 0], [0, PI / 8, 0]);
+      ring(8, 14, (x, z, a) => t.add(B(4.6, 4.6, 3.4), K.wall2, [x, 49.2, z], [0, -a + PI / 2, 0]));
+      t.add(CN(12.5, 19, 8), f.color, [0, 56.5, 0]).add(S(1.3, 5, 4), GOLD, [0, 66.5, 0]).glow(B(2.2, 5.6, 1), WIN, [0, 31, s * 13]).glow(B(2.2, 5.6, 1), WIN, [0, 31, -s * 13]);
+      if (end) flag(t, f, 0, 66, 0, 15, 10);
+    },
+    keep(q, f, K) {
+      q.add(C(27, 29, 6, 8), K.wall2, [0, 3, 0], [0, PI / 8, 0]).add(C(23, 26, 58, 8), K.wall, [0, 32, 0], [0, PI / 8, 0]).add(C(26.5, 26.5, 4, 8), K.wall2, [0, 62, 0], [0, PI / 8, 0]);
+      ring(12, 24.5, (x, z, a) => q.add(B(6.4, 6, 4.4), K.wall2, [x, 67, z], [0, -a + PI / 2, 0]));
+      q.add(C(12.5, 13.5, 20, 8), K.wall, [0, 74, 0]).add(C(14.6, 14.6, 2.4, 8), K.wall2, [0, 85, 0]).add(CN(15.5, 20, 8), f.color, [0, 96, 0]);
+      flag(q, f, 0, 104, 0, 18, 12);
+      q.add(B(14, 27, 0.8), f.color, [0, 38, 23.4]).add(B(14, 2, 0.9), GOLD, [0, 25.4, 23.5]).add(B(5.4, 5.4, 0.9), GOLD, [0, 41, 23.6], [0, 0, PI / 4]).add(B(17, 1.6, 1.6), DWOOD, [0, 52, 23.8]);
+      ring(4, 23.6, (x, z, a) => q.glow(B(2.6, 6.4, 1.4), WIN, [x, 50, z], [0, -a + PI / 2, 0]), PI / 4);
+      ring(4, 12.8, (x, z, a) => q.glow(B(2.2, 5, 1.2), WIN, [x, 76, z], [0, -a + PI / 2, 0]), PI / 4);
+    },
+  },
+  horde: {
+    run(q, len, s, f, K) {
+      for (let x = 3, i = 0; x < len; x += 6.2, i++) {
+        const h = 21 + (i * 7 % 5) * 2.2, z = (i % 2) * 1.2 - 0.6;
+        q.add(C(2.9, 3.4, h, 5), i % 3 ? K.wall : K.wall2, [x, h / 2, z], [0, i, (i % 3 - 1) * 0.04]).add(CN(2.9, 6, 5), i % 4 ? DWOOD : BONE, [x, h + 3, z], [0, i, 0]);
+      }
+      q.add(B(len, 2.2, 1.6), DWOOD, [len / 2, 14, s * 4]).add(B(len, 2.2, 1.6), DWOOD, [len / 2, 6, s * 4]);
+      for (let x = 20; x < len; x += 36) q.add(CN(1.7, 16, 5), BONE, [x, 12, -s * 8], [-s * 1.05, 0, 0]);
+    },
+    bay(q, s, f) {
+      for (const x of [-7.5, 7.5]) q.add(C(0.7, 0.8, 36, 5), DWOOD, [x, 18, s * 9]);
+      q.add(B(16, 1.2, 1.2), DWOOD, [0, 33, s * 9]).add(B(13, 15, 0.5), f.color, [0, 24.5, s * 9]).add(B(13, 3, 0.6), f.dark, [0, 15.6, s * 9])
+        .add(S(2.8, 7, 5), BONE, [0, 35.6, s * 9], Z3, [1, 1.1, 0.9]).add(B(1, 1.1, 0.8), EYE, [1.1, 36, s * 11.4]).add(B(1, 1.1, 0.8), EYE, [-1.1, 36, s * 11.4])
+        .add(CN(0.8, 6, 5), BONE, [3.8, 37.6, s * 9], [0, 0, -0.9]).add(CN(0.8, 6, 5), BONE, [-3.8, 37.6, s * 9], [0, 0, 0.9]);
+      for (const x of [-24, 24]) { q.add(C(0.7, 0.7, 7, 5), DARK, [x, 3.5, s * 11]).add(C(4.2, 2.8, 4, 8), DARK, [x, 8.6, s * 11]); fire(q, x, 9.4, s * 11, 0.7); }
+    },
+    tower(t, s, f, K, end) {
+      t.add(C(11, 13.5, 18, 7), K.wall, [0, 9, 0]).add(C(13.8, 13.8, 2.4, 7), f.color, [0, 16, 0]);
+      for (const sx of [1, -1]) for (const sz of [1, -1]) t.add(C(1.5, 2, 44, 5), DWOOD, [sx * 9.5, 22, sz * 9.5], [sz * 0.05, 0, -sx * 0.05]);
+      t.add(B(27, 2.4, 27), WOOD, [0, 35, 0]);
+      for (const k of [1, -1]) t.add(B(27, 4, 1.4), K.wall2, [0, 39, k * 12.8]).add(B(1.4, 4, 27), K.wall2, [k * 12.8, 39, 0]);
+      t.add(CN(21, 15, 4), HIDE, [0, 53.5, 0], [0, PI / 4, 0]).add(CN(11, 9, 4), '#8f6f45', [0, 59, 0], [0, PI / 4, 0])
+        .add(S(3.2, 7, 5), BONE, [0, 40.4, s * 14.4], Z3, [1, 1.1, 0.9]).add(B(1.1, 1.2, 0.9), EYE, [1.3, 40.8, s * 17.1]).add(B(1.1, 1.2, 0.9), EYE, [-1.3, 40.8, s * 17.1])
+        .add(B(10, 13, 0.5), f.color, [0, 27, s * 13.4]);
+      ring(4, 13, (x, z, a) => t.add(CN(1.7, 15, 5), BONE, [x, 57, z], [Math.sin(a) * 0.8, 0, -Math.cos(a) * 0.8]), PI / 4);
+      if (end) t.add(C(0.9, 0.9, 16, 5), DWOOD, [0, 70, 0]).add(S(2.6, 6, 5), BONE, [0, 79, 0]);
+    },
+    keep(q, f, K) {
+      ring(16, 30, (x, z, a, i) => { const h = 15 + (i * 7 % 5) * 1.8; q.add(C(2.6, 3.1, h, 5), i % 3 ? K.wall : K.wall2, [x, h / 2, z]).add(CN(2.6, 5, 5), BONE, [x, h + 2.5, z]); });
+      q.add(C(21, 25, 38, 8), K.wall, [0, 19, 0]).add(C(25.6, 25.6, 3, 8), f.color, [0, 35, 0]).add(C(23, 24.5, 6, 8), K.wall2, [0, 40, 0])
+        .add(CN(29, 28, 8), HIDE, [0, 57, 0]).add(CN(17, 15, 8), '#8f6f45', [0, 68, 0]).add(C(1.2, 1.2, 18, 5), DWOOD, [0, 82, 0]).add(S(3.2, 6, 5), BONE, [0, 92, 0]);
+      ring(4, 22, (x, z, a) => q.add(CN(3, 25, 6), BONE, [x, 62, z], [Math.sin(a) * 0.75, 0, -Math.cos(a) * 0.75]), PI / 4);
+      q.add(S(7.5, 8, 6), BONE, [0, 25, 23], Z3, [1, 1.1, 0.9]).add(B(2.6, 3, 1.6), EYE, [3, 26.4, 29]).add(B(2.6, 3, 1.6), EYE, [-3, 26.4, 29]).add(B(6, 1.6, 1.4), EYE, [0, 20.6, 29])
+        .add(CN(2.2, 16, 5), BONE, [10.5, 31, 23], [0, 0, -0.9]).add(CN(2.2, 16, 5), BONE, [-10.5, 31, 23], [0, 0, 0.9]);
+      for (const x of [-17, 17]) { q.add(C(4.6, 3, 4.4, 8), DARK, [x, 44.6, 17]); fire(q, x, 45.6, 17, 0.9); }
+    },
+  },
+  arcane: {
+    run(q, len, s, f, K) {
+      q.add(B(len, 3, 16), K.wall2, [len / 2, 1.5, 0]).add(B(len, 15, 10), K.wall, [len / 2, 10.5, 0]).add(B(len, 1.6, 12.5), K.wall2, [len / 2, 18.8, 0]).glow(B(len, 0.8, 1.6), f.color, [len / 2, 20, 0]);
+      for (let x = 22, i = 0; x < len; x += 44, i++) {
+        q.add(C(2.6, 3.2, 26, 6), K.wall, [x, 13, 0]).add(C(3.6, 2.6, 1.6, 6), K.wall2, [x, 26.8, 0]).glow(OCT(2.6), i % 2 ? '#e6d4ff' : f.color, [x, 33.4, 0], Z3, [1, 1.7, 1])
+          .glow(B(1, 7, 0.5), f.color, [x + 22, 10.5, s * 5.2]).glow(B(4, 1, 0.5), f.color, [x + 22, 12.4, s * 5.2]);
+      }
+    },
+    bay(q, s, f) {
+      q.add(B(11, 14, 0.5), f.color, [0, 10.6, s * 5.4]).add(B(11, 1.4, 0.6), GOLD, [0, 4.6, s * 5.4]).add(B(11, 1.4, 0.6), GOLD, [0, 17, s * 5.4])
+        .glow(OCT(4.6), f.color, [0, 44, 0], Z3, [1, 1.8, 1]).glow(OCT(2.2), '#ffffff', [0, 44, 0], Z3, [1, 1.8, 1]).glow(T(9, 0.5, 4, 20), '#e6d4ff', [0, 44, 0], [PI / 2 + 0.3, 0, 0.2]);
+    },
+    tower(t, s, f, K) {
+      t.add(C(11.5, 13, 4, 6), K.wall2, [0, 2, 0]).add(C(8, 11, 50, 6), K.wall, [0, 25, 0]).add(C(10.5, 10.5, 2.4, 6), K.wall2, [0, 51.2, 0]).add(CN(10.5, 24, 6), f.color, [0, 64.4, 0])
+        .glow(T(11.4, 0.6, 4, 20), f.color, [0, 20, 0], [PI / 2, 0, 0]).glow(T(10, 0.5, 4, 20), '#e6d4ff', [0, 37, 0], [PI / 2, 0, 0])
+        .glow(OCT(3.2), f.color, [0, 84, 0], Z3, [1, 1.8, 1]).glow(OCT(1.5), '#ffffff', [0, 84, 0], Z3, [1, 1.8, 1])
+        .glow(B(1.6, 7, 1), WIN, [0, 42, s * 8.2]).glow(B(1.6, 7, 1), WIN, [0, 42, -s * 8.2]);
+    },
+    keep(q, f, K) {
+      q.add(C(27, 31, 6, 8), K.wall2, [0, 3, 0]).add(C(21, 25, 6, 8), K.wall, [0, 9, 0]).glow(T(26.5, 0.8, 4, 32), f.color, [0, 6.6, 0], [PI / 2, 0, 0])
+        .add(C(12, 17, 56, 8), K.wall, [0, 40, 0]).add(C(14.5, 14.5, 3, 8), K.wall2, [0, 69.5, 0]).add(C(7.5, 10.5, 20, 8), K.wall, [0, 81, 0]).add(C(9, 9, 2.4, 8), K.wall2, [0, 92, 0]).add(CN(9.6, 22, 8), f.color, [0, 104, 0])
+        .add(B(8, 13, 2), '#2b2140', [0, 18.5, 15.4]).add(B(10.6, 1.8, 2.6), GOLD, [0, 25.6, 15.6])
+        .glow(OCT(6.5), f.color, [0, 127, 0], Z3, [1, 1.8, 1]).glow(OCT(3.1), '#ffffff', [0, 127, 0], Z3, [1, 1.8, 1])
+        .glow(T(21, 0.8, 5, 28), f.color, [0, 60, 0], [PI / 2 + 0.3, 0, 0]).glow(T(26, 0.6, 5, 28), '#e6d4ff', [0, 45, 0], [PI / 2 - 0.25, 0, 0.2]);
+      ring(8, 13.6, (x, z, a) => q.glow(B(1.6, 10, 1.6), f.color, [x, 46, z], [0, -a, 0]), PI / 8);
+      ring(4, 25, (x, z) => q.add(C(3.6, 4.6, 26, 6), K.wall, [x, 19, z]).add(C(4.8, 4.8, 1.6, 6), K.wall2, [x, 32.6, z]).add(CN(5, 10, 6), f.color, [x, 38.4, z]).glow(OCT(1.9), f.color, [x, 46.6, z], Z3, [1, 1.7, 1]), PI / 4);
+    },
+  },
+  mech: {
+    run(q, len, s, f, K) {
+      q.add(B(len, 4, 17), DARK, [len / 2, 2, 0]).add(B(len, 17, 9), K.wall, [len / 2, 12.5, 0]).add(B(len, 1.6, 11.5), K.wall2, [len / 2, 21.8, 0])
+        .add(B(len, 2.8, 0.5), DARK, [len / 2, 7, s * 4.7]).add(C(1.1, 1.1, len, 6), DSTEEL, [len / 2, 24.4, -s * 3.4], LAYX);
+      for (let x = 6; x < len; x += 12) q.add(B(6, 2.8, 0.6), '#f2c230', [x, 7, s * 4.8]);
+      for (let x = 22; x < len; x += 44) q.add(B(4, 25, 12.5), K.wall2, [x, 12.5, 0]).add(B(5, 1.6, 13.5), DARK, [x, 25.8, 0]).glow(B(2.4, 1.2, 0.6), '#9ff3ff', [x, 19, s * 6.5]);
+    },
+    bay(q, s, f) {
+      q.add(B(19, 11, 0.5), DARK, [0, 14.5, s * 4.8]).add(B(16, 8.4, 0.6), f.color, [0, 14.5, s * 5]).glow(B(11, 1, 0.5), '#9ff3ff', [0, 14.5, s * 5.4])
+        .add(B(11, 8, 8), '#5c646e', [26, 4, s * 12]).add(B(11.4, 1, 8.4), DARK, [26, 4, s * 12]).add(C(2.7, 2.7, 7, 9), DARK, [-26, 3.5, s * 11]).add(C(2.85, 2.85, 1.2, 9), '#f2c230', [-26, 4.4, s * 11]);
+    },
+    tower(t, s, f, K, end) {
+      t.add(B(30, 4, 30), DARK, [0, 2, 0]).add(B(26, 34, 26), K.wall2, [0, 20, 0]).add(B(26.8, 2.4, 26.8), f.color, [0, 30, 0]).add(B(30, 3, 30), DARK, [0, 38.5, 0])
+        .add(B(18, 11, 18), K.wall, [0, 45.5, 0]).add(B(19, 1.6, 19), f.color, [0, 51.8, 0])
+        .glow(B(11, 3, 0.6), '#9ff3ff', [0, 46, s * 9.2]).glow(B(11, 3, 0.6), '#9ff3ff', [0, 46, -s * 9.2]).glow(B(8, 2.4, 0.6), '#9ff3ff', [0, 22, s * 13.2])
+        .add(C(0.3, 0.3, 18, 4), DSTEEL, [6, 61, -s * 5]).glow(S(1.2, 6, 5), '#ff4030', [6, 70.6, -s * 5]);
+      for (const sx of [1, -1]) for (const sz of [1, -1]) t.add(B(3, 37, 3), DARK, [sx * 12.6, 18.5, sz * 12.6]);
+      if (end) t.add(C(1.6, 1.6, 5, 6), DSTEEL, [-5, 54.5, 0]).add(C(3.4, 2.4, 5, 8), DARK, [-5, 58, s * 2], [s * 0.9, 0, 0]).glow(C(2.9, 2.9, 0.6, 8), '#fff2c0', [-5, 59.7, s * 4.1], [s * 0.9, 0, 0]);
+    },
+    keep(q, f, K) {
+      q.add(C(30, 33, 4, 6), DARK, [0, 2, 0], [0, PI / 6, 0]).add(C(26, 30, 26, 6), K.wall, [0, 17, 0], [0, PI / 6, 0]).add(C(27.4, 27.4, 2.4, 6), f.color, [0, 31, 0], [0, PI / 6, 0])
+        .add(B(32, 18, 28), K.wall2, [0, 41, 0]).add(B(34, 2, 30), DARK, [0, 51, 0]).add(B(18, 10, 16), K.wall, [-5, 57, -3]).add(B(19, 1.6, 17), f.color, [-5, 62.8, -3])
+        .add(B(14, 14, 2), '#1d2025', [0, 11, 24.6]).add(B(16, 2, 3), f.color, [0, 19, 24.4]);
+      for (let i = -3; i <= 3; i++) q.add(B(1.4, 14, 2.3), i % 2 ? '#1d2025' : '#f2c230', [i * 2, 11, 24.7]);
+      for (const x of [-10, 0, 10]) q.glow(B(5, 3, 0.6), '#9ff3ff', [x, 42, 14.3]).glow(B(5, 3, 0.6), '#9ff3ff', [x, 42, -14.3]);
+      for (const z of [-8, 0, 8]) q.glow(B(0.6, 3, 4.4), '#9ff3ff', [16.3, 42, z]).glow(B(0.6, 3, 4.4), '#9ff3ff', [-16.3, 42, z]);
+      for (const [x, z, h] of [[10, -7, 36], [10, 5, 27]]) q.add(C(3.6, 4.6, h, 8), DARK, [x, 52 + h / 2, z]).add(C(4.2, 4.2, 2, 8), f.color, [x, 52 + h - 4, z]).add(C(4, 4, 1.6, 8), DSTEEL, [x, 53 + h, z]);
+      q.add(C(1, 1.4, 8, 6), DSTEEL, [-5, 67, -3]).add(DM(7, 10), STEEL, [-5, 75, -3], [PI + 0.9, 0, 0]).add(C(0.3, 0.3, 7, 4), DSTEEL, [-5, 74.5, -0.4], [0.9, 0, 0]).glow(S(0.9, 5, 4), '#ff4030', [-5, 76.6, 2.4])
+        .add(C(0.3, 0.3, 24, 4), DSTEEL, [-12, 75, -9]).glow(S(1.2, 6, 5), '#ff4030', [-12, 87.6, -9]);
+    },
+  },
+};
+// bases — [{ x, y, fac, f }] (цитадели игроков), w/h — размер карты.
+// База в углу получает стену вдоль обоих краёв с главной башней в самом углу; база у середины стороны — прямую стену за спиной.
+export function makeBaseWalls(bases, w, h) {
+  const p = new Part('walls'), SC = 1.25, OFF = 44, NEAR = 700, SINK = -5; // SC — крупнее зданий, чтобы стена читалась издалека
+  for (const b of bases) {
+    const st = WALLS[b.fac], K = KIT[b.fac], f = b.f;
+    const ex = b.x < NEAR ? -1 : b.x > w - NEAR ? 1 : 0, ez = b.y < NEAR ? -1 : b.y > h - NEAR ? 1 : 0;
+    if (!st || (!ex && !ez)) continue;
+    const wx = ex < 0 ? -OFF : w + OFF, wz = ez < 0 ? -OFF : h + OFF;
+    let keep, runs; // run: направление стены (dx, dz), сторона базы (nx, nz), длина
+    if (ex && ez) { keep = [wx, wz]; runs = [[0, -ez, -ex, 0, 880], [-ex, 0, 0, -ez, 880]]; }
+    else if (ex) { keep = [wx, b.y]; runs = [[0, 1, -ex, 0, 645], [0, -1, -ex, 0, 645]]; }
+    else { keep = [b.x, wz]; runs = [[1, 0, 0, -ez, 645], [-1, 0, 0, -ez, 645]]; }
+    for (const [dx, dz, nx, nz, L] of runs) {
+      const s = Math.sign(-dz * nx + dx * nz), len = L / SC, n = Math.round(len / 175);
+      p.at([keep[0], SINK, keep[1]], [0, Math.atan2(-dz, dx), 0], q => {
+        st.run(q, len, s, f, K);
+        for (let i = 1; i <= n; i++) {
+          q.at([len * (i - 0.5) / n + (i === 1 ? 14 : 0), 0, 0], Z3, t => st.bay(t, s, f, K));
+          q.at([len * i / n, 0, 0], Z3, t => st.tower(t, s, f, K, i === n));
+        }
+      }, SC);
+    }
+    p.at([keep[0], SINK, keep[1]], [0, Math.atan2(b.x - keep[0], b.y - keep[1]), 0], q => st.keep(q, f, K), SC);
+  }
+  return p.build();
+}
+
 // ================= Шаблоны и экземпляры =================
 const TPL = {};
 function instance(key, build) {
@@ -1233,6 +1390,15 @@ function humanoidPose(st, e, t, dt) {
     // l — подъём всей руки вокруг линии плеч: обе руки поворачиваются на один угол, и оружие в двух руках идёт как одно целое
     if (q.l) B[n].quaternion.premultiply(LIFT_Q.setFromAxisAngle(AXIS_Z, q.l[0] * m + q.l[1] * up + q.l[2] * dn));
   }
+  // Записанный удар: позы костей по кадрам (считаются при сборке воина, чтобы обе руки оставались на рукояти)
+  const C = S.clip, atk = st.atk !== undefined && st.atk < 1;
+  if (C && atk) {
+    const f = st.atk * (C.n - 1), i = Math.min(Math.floor(f), C.n - 2) * 4, w = f - i / 4, v = 1 - w;
+    for (const n in C.q) {
+      const q = C.q[n], o = B[n]; if (!o) continue;
+      o.quaternion.set(q[i] * v + q[i + 4] * w, q[i + 1] * v + q[i + 5] * w, q[i + 2] * v + q[i + 6] * w, q[i + 3] * v + q[i + 7] * w).normalize();
+    }
+  } else if (C && B.wpnR) { B.wpnR.quaternion.identity(); if (B.wpnL) B.wpnL.quaternion.identity(); }
 }function skinned(type) {
   const d = SK[type], cfg = SK_CFG[type], g = new THREE.Group(), by = {};
   g.name = 'model'; g.scale.setScalar(cfg.scale);

@@ -57,22 +57,28 @@
 </div>
 
 <div id="menu" class="screen">
-  <div class="box">
-    <h1>СТРАТЕГ</h1>
-    <p class="sub">Построй базу, собери армию и разрушь цитадели врагов. В любого воина можно вселиться и сражаться самому.</p>
-    <div id="modeBtns" class="seg"></div>
-    <div id="netBox" class="hidden"></div>
-    <div class="row-title">Выбери фракцию</div>
-    <div id="facCards"></div>
-    <div class="row-title">Карта</div>
-    <div id="mapCards"></div>
-    <div class="opts">
-      <div><div class="row-title">Противники</div><div id="botBtns" class="seg"></div></div>
-      <div><div class="row-title">Сложность</div><div id="diffBtns" class="seg"></div></div>
-    </div>
+  <header class="mTop">
+    <div class="brand"><h1>Стратег</h1><p>Построй базу, собери армию, разрушь цитадели врагов</p></div>
+    <div id="modeBtns" class="tabs"></div>
+  </header>
+  <aside class="mCol mLeft">
+    <section class="pane"><div class="ph">Фракция</div><div id="facCards"></div></section>
+    <section id="netBox" class="pane hidden"></section>
+  </aside>
+  <section id="facInfo"></section>
+  <aside class="mCol mRight">
+    <section class="pane">
+      <div class="ph">Поле боя</div>
+      <div class="mapHead"><canvas id="mapPrev" width="190" height="190"></canvas><div id="mapInfo"></div></div>
+      <div id="mapCards"></div>
+    </section>
+    <section class="pane">
+      <div class="ph">Противники</div><div id="botBtns" class="seg"></div>
+      <div class="ph">Сложность</div><div id="diffBtns" class="seg"></div>
+    </section>
     <button id="startBtn" class="big">В бой</button>
-    <p class="beta">Бета-версия · играть с клавиатурой и мышью на компьютере · управление — клавиша H в игре · для сетевой игры нужен интернет</p>
-  </div>
+  </aside>
+  <p class="beta mFoot">Бета-версия · клавиатура и мышь · управление — клавиша H в бою · для сетевой игры нужен интернет</p>
 </div>
 
 <div id="pauseMenu" class="screen hidden">

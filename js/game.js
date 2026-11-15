@@ -11,7 +11,7 @@ function blankInput() { return { keys: {}, yaw: 0, aim: 0.7, lmb: false, rmb: fa
 // c — { faction, bot, team }. inp — откуда читается управление вселённым воином (у местного игрока — общий Input)
 function mkPlayer(i, c) {
   return { idx: i, faction: c.faction, fac: FACTIONS[c.faction], bot: !!c.bot, team: c.team, gold: START_GOLD, alive: true, income: 0, alarm: null, ai: { t: rand(0, 1), wave: 5 },
-    up: { atk: 0, arm: 0, eco: 0 }, research: null, heroLvl: 1, heroXp: 0, heroU: null, heroDeaths: 0, lost: 0, bl: 0, autoCast: true, poss: null, inp: i === G.human ? Input : blankInput(), nq: [] };
+    up: { atk: 0, arm: 0, eco: 0 }, research: null, heroLvl: 1, heroXp: 0, heroU: null, heroDeaths: 0, heroBack: 0, lost: 0, bl: 0, autoCast: true, poss: null, inp: i === G.human ? Input : blankInput(), nq: [] };
 }
 // Сообщение игроку: местному — сразу на экран, удалённому — уйдёт по сети
 function note(p, text) { if (p.idx === G.human) G.notes.push(text); else if (G.net === 'host' && !p.bot) p.nq.push(text); }
@@ -87,10 +87,10 @@ function spawnBuilding(owner, type, x, y, instant) {
 }
 
 function countB(p, type) { let n = 0; for (const e of G.ents) if (e.kind === 'bld' && e.owner === p.idx && !e.dead && e.type === type) n++; return n; }
-function buildCost(p, type) { return type === 'mine' ? BUILDINGS.mine.cost + 40 * countB(p, 'mine') : BUILDINGS[type].cost; }
+function buildCost(p, type) { const d = BUILDINGS[type]; return type === 'mine' ? d.cost + 40 * countB(p, 'mine') : d.tower ? d.cost + TOWER_STEP * countB(p, type) : d.cost; }
 function popOf(p) {
   let n = 0;
-  for (const e of G.ents) { if (e.owner !== p.idx || e.dead) continue; if (e.kind === 'unit') n++; else n += e.queue.length; }
+  for (const e of G.ents) { if (e.owner !== p.idx || e.dead) continue; if (e.kind === 'unit') n += UNITS[e.type].pop; else for (const q of e.queue) n += UNITS[q].pop; }
   return n;
 }
 
@@ -108,6 +108,7 @@ function canPlace(p, type, x, y) {
   for (const o of G.obstacles) if (Math.hypot(o.x - x, o.y - y) < o.r + r + 12) return 'Мешает препятствие';
   if (!near) return 'Стройте рядом со своими зданиями';
   if (type === 'mine' && countB(p, 'mine') >= MAX_MINES) return 'Максимум шахт: ' + MAX_MINES;
+  if (BUILDINGS[type].tower && countB(p, type) >= MAX_TOWERS) return 'Максимум башен: ' + MAX_TOWERS;
   return '';
 }
 
@@ -130,7 +131,7 @@ function queueUnit(p, slot, b) {
   }
   if (!b) return 'Сначала постройте казарму';
   if (b.queue.length >= 6) return 'Очередь заполнена';
-  if (popOf(p) >= POP_CAP) return 'Достигнут лимит войск';
+  if (popOf(p) + d.pop > POP_CAP) return 'Достигнут лимит войск';
   if (p.gold < d.cost) return 'Недостаточно золота';
   p.gold -= d.cost;
   b.queue.push(type);
@@ -150,8 +151,8 @@ function setRepair(p, b, on) {
 }
 
 // ---------- Улучшения и герои ----------
-function unitMaxHp(p, type) { const d = UNITS[type]; return Math.round(d.hp * (1 + 0.15 * p.up.arm) * (d.hero ? 1 + 0.18 * (p.heroLvl - 1) : 1)); }
-function dmgMul(u) { const p = G.players[u.owner]; return (1 + 0.15 * p.up.atk) * (UNITS[u.type].hero ? 1 + 0.14 * (p.heroLvl - 1) : 1); }
+function unitMaxHp(p, type) { const d = UNITS[type]; return Math.round(d.hp * (1 + 0.15 * p.up.arm) * (d.hero ? 1 + HERO_HP * (p.heroLvl - 1) : 1)); }
+function dmgMul(u) { const p = G.players[u.owner]; return (1 + 0.15 * p.up.atk) * (UNITS[u.type].hero ? 1 + HERO_DMG * (p.heroLvl - 1) : 1); }
 function rescaleHp(p) { // после улучшения брони или нового уровня героя: запас здоровья растёт, доля сохраняется
   for (const e of G.ents) if (e.kind === 'unit' && e.owner === p.idx && !e.dead) { const m = unitMaxHp(p, e.type); e.hp = e.hp / e.maxHp * m; e.maxHp = m; }
 }
@@ -182,7 +183,8 @@ function queueHero(p) {
   const hq = p.hq;
   if (p.heroU && !p.heroU.dead) return 'Герой уже в строю';
   if (hq.queue.length) return 'Герой уже в пути';
-  if (popOf(p) >= POP_CAP) return 'Достигнут лимит войск';
+  if (G.time < p.heroBack) return 'Герой вернётся через ' + Math.ceil(p.heroBack - G.time) + ' с';
+  if (popOf(p) + UNITS[p.fac.hero].pop > POP_CAP) return 'Достигнут лимит войск';
   if (p.gold < heroCost(p)) return 'Недостаточно золота';
   p.gold -= heroCost(p);
   hq.queue.push(p.fac.hero);
@@ -219,16 +221,16 @@ function castAbility(u, d, tx, ty) {
     magic(u.x, u.y, 20, 20, '#fff2b0'); Sfx.play('heal', u.x, u.y);
   } else if (a.key === 'stomp') {
     for (const o of G.ents) if (o.team !== u.team && !o.dead && o.kind === 'unit' && edgeDist(u, o) <= a.r) o.stun = a.stun;
-    splashDamage(u.x, u.y, a.r + u.r, a.dmg * k, u, u.owner, 1.5, false);
+    splashDamage(u.x, u.y, a.r + u.r, a.dmg * k, u, u.owner, 1, false);
     dust(u.x, u.y, 16, 14); burst(u.x, u.y, 14, '#6b5a44', 1.8); addFx({ type: 'scorch', x: u.x, y: u.y, r: a.r * 0.6, life: 10 }); shake(u.x, u.y, 8);
   } else if (a.key === 'meteor') {
-    G.projs.push({ fall: true, T: 0.9, t: 0.9, x: tx + 150, y: ty, gx: tx, gy: ty, h: 520, ang: 0, dmg: a.dmg * k, splash: a.r, src: u, owner: u.owner, kind: 'meteor', bm: 1.5, trail: 0 });
+    G.projs.push({ fall: true, T: 0.9, t: 0.9, x: tx + 150, y: ty, gx: tx, gy: ty, h: 520, ang: 0, dmg: a.dmg * k, splash: a.r, src: u, owner: u.owner, kind: 'meteor', bm: 1, trail: 0 });
     addFx({ type: 'ring', x: tx, y: ty, r: a.r, life: 0.9, color: '#ff7a2a' }); addFx({ type: 'ping', x: tx, y: ty, r: a.r, life: 0.9, color: '#ff7a2a' });
     magic(u.x, u.y, 24, 12, '#ffb060'); Sfx.play('zap', u.x, u.y);
   } else if (a.key === 'rockets') {
     for (let i = 0; i < a.n; i++) {
       const ang = rand(0, TAU), rr = Math.sqrt(Math.random()) * a.spread;
-      fireGround(u, { proj: rand(230, 330), pk: 'shell', splash: a.r, bm: 1.5 }, tx + Math.cos(ang) * rr, ty + Math.sin(ang) * rr, a.dmg * k, true);
+      fireGround(u, { proj: rand(230, 330), pk: 'shell', splash: a.r, bm: 0.7 }, tx + Math.cos(ang) * rr, ty + Math.sin(ang) * rr, a.dmg * k, true);
     }
   }
 }
@@ -324,15 +326,17 @@ function meleeFx(u, t) {
 function damage(t, amt, src, bm, ranged) {
   if (t.dead) return;
   if (t.kind === 'bld') {
-    amt *= bm || 1;
+    amt *= (bm || 1) * BLD_ARMOR * siegeMul(G.time);
     G.players[t.owner].alarm = { x: t.x, y: t.y, t: G.time };
     t.hitT = G.time;
   } else {
-    if (ranged && UNITS[t.type].armorR) amt *= UNITS[t.type].armorR;
-    if (t.ctl) { amt *= 0.7; if (t === G.possessed) { G.heroHit = G.time; shake(t.x, t.y, 2.5); } }
+    if (src && src.kind === 'bld' && UNITS[t.type].hero) amt *= BLD_VS_HERO;
+    else if (ranged && UNITS[t.type].armorR) amt *= UNITS[t.type].armorR;
+    t.hitT = G.time;
+    if (t.ctl) { if (!(src && src.kind === 'bld')) amt *= 0.7; if (t === G.possessed) { G.heroHit = G.time; shake(t.x, t.y, 2.5); } }
     else if (src && !src.dead && !t.tgt && t.order.type !== 'move' && src.team !== t.team) t.tgt = src;
   }
-  if (src && src.ctl) { amt *= 1.5; addFx({ type: 'num', x: t.x, y: t.y, h: t.r * 2.4, text: Math.round(amt), life: 0.8, pid: src.owner }); }
+  if (src && src.ctl) { if (t.kind !== 'bld') amt *= 1.5; addFx({ type: 'num', x: t.x, y: t.y, h: t.r * 2.4, text: Math.round(amt), life: 0.8, pid: src.owner }); }
   t.hp -= amt;
   t.flash = 0.12;
   if (t.hp <= 0) kill(t);
@@ -361,9 +365,9 @@ function kill(e) {
   for (const q of G.players) { const h = q.heroU; if (h && !h.dead && q.team !== op.team && Math.hypot(h.x - e.x, h.y - e.y) < 340) gainXp(h, xp); }
   if (e.kind === 'unit' && UNITS[e.type].hero) {
     const p = G.players[e.owner];
-    p.heroU = null; p.heroDeaths++;
+    p.heroU = null; p.heroDeaths++; p.heroBack = G.time + heroDelay(p.heroLvl);
     addFx({ type: 'shock', x: e.x, y: e.y, r: 80, life: 0.6, color: col }); magic(e.x, e.y, 16, 16, col);
-    if (p.alive) note(p, 'Герой пал. Его можно возродить в цитадели');
+    if (p.alive) note(p, 'Герой пал. Возродить его можно через ' + heroDelay(p.heroLvl) + ' с');
   }
   if (op.poss === e) { op.poss = null; if (e === G.possessed) { G.possessed = null; G.possessLost = true; } }
   if (e.kind === 'bld') {
@@ -400,11 +404,14 @@ function findTarget(e, range, minRange, siege) {
 }
 
 function findWounded(u, range) {
-  let best = null, bf = 0.95;
+  let best = null, bf = 9;
   for (const o of G.units) {
     if (o.team !== u.team || o.dead || o === u) continue;
     const f = o.hp / o.maxHp;
-    if (f < bf && edgeDist(u, o) <= range) { bf = f; best = o; }
+    if (f >= 0.95 || edgeDist(u, o) > range) continue;
+    // цель, которую уже лечит другой жрец, менее привлекательна: целители расходятся по раненым
+    const s = f + (o.heals && o.heals.some(h => h.src !== u && G.time - h.t < HEAL_WINDOW) ? 0.3 : 0);
+    if (s < bf) { bf = s; best = o; }
   }
   return best;
 }
@@ -484,7 +491,8 @@ function updateProjs(dt) {
 // ---------- Воины ----------
 function attackStats(u, d) {
   let dmg = d.dmg * dmgMul(u);
-  if (d.charge && u.chargeT >= 1.2) { dmg *= 2.5; addFx({ type: 'shock', x: u.x, y: u.y, r: 46, life: 0.3, color: '#ffffff' }); dust(u.x, u.y, 5, 8); shake(u.x, u.y, 2); }
+  u.charged = d.charge && u.chargeT >= 1.2;
+  if (u.charged) { dmg *= 2; addFx({ type: 'shock', x: u.x, y: u.y, r: 46, life: 0.3, color: '#ffffff' }); dust(u.x, u.y, 5, 8); shake(u.x, u.y, 2); }
   u.chargeT = 0;
   u.cd = d.cd * (d.rage ? 0.45 + 0.55 * u.hp / u.maxHp : 1);
   u.swing = 0.25;
@@ -495,12 +503,16 @@ function doAttack(u, d, t) {
   const dmg = attackStats(u, d);
   if (d.proj) fireAt(u, d, t, dmg);
   else if (d.splash) splashDamage(t.x, t.y, d.splash, dmg, u, u.owner, d.bm, false);
+  else if (u.charged && d.trample) splashDamage(t.x, t.y, d.trample, dmg, u, u.owner, d.bm, false); // удар с разгона сминает всех рядом
   else { meleeFx(u, t); damage(t, dmg, u, d.bm, false); Sfx.play('hit', u.x, u.y); }
 }
 
 function doHeal(u, d, t) {
   u.cd = d.cd; u.swing = 0.25;
-  t.hp = Math.min(t.maxHp, t.hp + d.heal * (u.ctl ? 1.5 : 1));
+  // Лечение от нескольких жрецов складывается с убыванием: каждый следующий целитель на той же цели даёт меньше
+  const hs = t.heals = (t.heals || []).filter(h => G.time - h.t < HEAL_WINDOW && h.src !== u && !h.src.dead);
+  t.hp = Math.min(t.maxHp, t.hp + d.heal * (u.ctl ? 1.5 : 1) / (1 + HEAL_STACK * hs.length));
+  hs.push({ src: u, t: G.time });
   addFx({ type: 'beam', x1: u.x, y1: u.y, x2: t.x, y2: t.y, color: '#6ee7a0', life: 0.25 });
   magic(t.x, t.y, 10, 7, '#7dffb0'); addFx({ type: 'ring', x: t.x, y: t.y, r: t.r + 12, life: 0.4, color: '#7dffb0' });
   Sfx.play('heal', u.x, u.y);
@@ -529,7 +541,7 @@ function controlPossessed(u, d, dt, Input) { // Input — управление �
     u.x += mx * sp; u.y += my * sp;
     u.moving = true; u.chargeT += dt; u.gx = u.x + mx * 200; u.gy = u.y + my * 200;
   }
-  u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.015 * dt);
+  if (G.time - (u.hitT || -9) > POSS_REGEN_PAUSE) u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.015 * dt); // отдышка вселённого — только вне боя
   if (d.abil && u.acd <= 0 && (Input.rmb || k.Space)) {
     const ad = abilDist(u, d, Input.aim);
     castAbility(u, d, u.x + Math.cos(u.face) * ad, u.y + Math.sin(u.face) * ad);
@@ -548,9 +560,9 @@ function controlPossessed(u, d, dt, Input) { // Input — управление �
       hits.push([ed, o]);
     }
     hits.sort((a, b) => a[0] - b[0]);
-    if (d.splash) {
+    if (d.splash || u.charged && d.trample) {
       for (const h of hits) damage(h[1], dmg, u, d.bm, false);
-      addFx({ type: 'boom', x: u.x + Math.cos(u.face) * (u.r + 14), y: u.y + Math.sin(u.face) * (u.r + 14), r: d.splash, life: 0.3, color: '#ffe08a' });
+      addFx({ type: 'boom', x: u.x + Math.cos(u.face) * (u.r + 14), y: u.y + Math.sin(u.face) * (u.r + 14), r: d.splash || d.trample, life: 0.3, color: '#ffe08a' });
     } else if (hits.length) { meleeFx(u, hits[0][1]); damage(hits[0][1], dmg, u, d.bm, false); }
     else addFx({ type: 'slash', x: u.x, y: u.y, h: u.r * 1.3, ang: u.face, r: u.r + 12, life: 0.16 });
     Sfx.play('hit', u.x, u.y);
@@ -580,7 +592,7 @@ function updateUnit(u, dt) {
     if (u.order.type === 'attack') u.tgt = u.order.target;
     else if (u.order.type !== 'move') {
       if (d.heal) u.healTgt = findWounded(u, d.aggro);
-      const t = findTarget(u, d.aggro, 0, d.bm > 1);
+      const t = findTarget(u, d.aggro, 0, d.bm >= 2);
       if (t) u.tgt = t; else if (u.tgt && edgeDist(u, u.tgt) > d.aggro * 1.6) u.tgt = null;
     }
     if (d.abil && u.acd <= 0 && (G.players[u.owner].bot || G.players[u.owner].autoCast)) heroAuto(u, d);
@@ -744,6 +756,7 @@ function updateBuilding(b, dt) {
 
 // ---------- Главный шаг ----------
 function update(dt) {
+  if (G.time < SIEGE_START && G.time + dt >= SIEGE_START) for (const p of G.players) if (p.alive) note(p, 'Осадный час: здания слабеют с каждой минутой');
   G.time += dt;
   if (G.dirty) { G.ents = G.ents.filter(e => !e.dead); G.dirty = false; }
   const units = G.units = G.ents.filter(e => e.kind === 'unit');

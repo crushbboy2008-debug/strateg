@@ -2,12 +2,29 @@
 // ---------- Константы и данные игры ----------
 const TAU = Math.PI * 2;
 const WORLD = { w: 3400, h: 3400 };
-const POP_CAP = 40;
+const POP_CAP = 50;   // места в войске: дешёвый воин занимает 1 место, дорогой (от 100 золота) и герой — 2
 const BUILD_RADIUS = 300;
 const START_GOLD = 320;
 const MAX_MINES = 8;
+const MAX_TOWERS = 3;        // оборонительных башен на игрока; каждая следующая дороже на TOWER_STEP
+const TOWER_STEP = 40;
+// Осадный час: с этой секунды матча здания получают всё больше урона (+SIEGE_RATE за минуту), чтобы бой не тянулся вечно
+const SIEGE_START = 600, SIEGE_RATE = 0.25, SIEGE_MAX = 3;
+function siegeMul(t) { return Math.min(SIEGE_MAX, 1 + Math.max(0, t - SIEGE_START) / 60 * SIEGE_RATE); }
+// Павший герой возвращается не сразу: чем выше уровень, тем дольше
+function heroDelay(lvl) { return 20 + 12 * lvl; }
 // Починка: доля цены здания за полный ремонт, доля прочности в секунду, пауза после попадания
 const REPAIR_COST = 0.5, REPAIR_RATE = 0.05, REPAIR_PAUSE = 3;
+// Здания крепкие: обычные удары наносят им лишь часть урона, ломать их — дело осадных воинов (у них большой bm)
+const BLD_ARMOR = 0.55;
+// Рост героя за уровень: здоровье и урон
+const HERO_HP = 0.13, HERO_DMG = 0.10;
+// Здания бьют героев сильнее и пробивают их броню: герой в одиночку базу не берёт
+const BLD_VS_HERO = 1.4;
+// Лечение: окно, в котором целители на одной цели мешают друг другу, и сила убывания (2 жреца ≈ ×1.33, 3 ≈ ×1.5)
+const HEAL_WINDOW = 1.2, HEAL_STACK = 0.5;
+// Вселённый воин восстанавливает здоровье, только если его не били столько секунд
+const POSS_REGEN_PAUSE = 4;
 
 // Карты. size — сторона квадрата; lay — расстановка баз (corner — по углам, cross — у середин сторон);
 // pal — цвета земли; trees — виды деревьев; rock — цвета скал [камень, тёмный камень, шапка]
@@ -60,49 +77,51 @@ const FACTIONS = {
 };
 
 // range — дистанция атаки от края до края; proj — скорость снаряда (нет = ближний бой)
-// armorR — множитель урона от снарядов; bm — множитель урона по зданиям
+// armorR — множитель урона от снарядов; bm — множитель урона по зданиям (от 2 — осадный воин, сам идёт ломать здания)
+// trample — радиус, в котором удар с разгона задевает всех врагов
 const UNITS = {
   // --- Легион ---
   swordsman: { name: 'Мечник', info: 'Щит: получает вдвое меньше урона от снарядов.',
-    hp: 170, speed: 85, dmg: 14, range: 8, cd: 0.9, r: 11, cost: 60, time: 5, armorR: 0.5 },
-  archer: { name: 'Лучник', info: 'Стреляет издалека, но хрупок.',
-    hp: 70, speed: 90, dmg: 12, range: 190, cd: 1.1, r: 9, cost: 70, time: 6, proj: 440, pk: 'arrow' },
-  knight: { name: 'Рыцарь', info: 'Разгон: первый удар после рывка наносит ×2.5 урона.',
-    hp: 230, speed: 150, dmg: 22, range: 10, cd: 1.2, r: 13, cost: 140, time: 9, charge: true },
+    hp: 180, speed: 85, dmg: 14, range: 8, cd: 0.9, r: 11, cost: 60, time: 5, armorR: 0.5 },
+  archer: { name: 'Лучник', info: 'Меткий стрелок: бьёт издалека и больно, но хрупок.',
+    hp: 80, speed: 90, dmg: 16, range: 190, cd: 1.1, r: 9, cost: 70, time: 6, proj: 440, pk: 'arrow' },
+  knight: { name: 'Рыцарь', info: 'Разгон: удар после рывка наносит двойной урон всем врагам рядом. Таран: +60% урона по зданиям.',
+    hp: 260, speed: 150, dmg: 22, range: 10, cd: 1.2, r: 13, cost: 145, time: 9, charge: true, trample: 34, bm: 1.6 },
   // --- Орда ---
   berserker: { name: 'Берсерк', info: 'Ярость: чем меньше здоровья, тем быстрее бьёт.',
     hp: 125, speed: 105, dmg: 13, range: 8, cd: 0.85, r: 10, cost: 55, time: 4.5, rage: true },
   axethrower: { name: 'Метатель', info: 'Мощные броски топоров на средней дистанции.',
     hp: 85, speed: 88, dmg: 24, range: 115, cd: 1.4, r: 10, cost: 75, time: 6, proj: 340, pk: 'axe' },
-  ogre: { name: 'Огр', info: 'Удар по площади, двойной урон по зданиям.',
-    hp: 520, speed: 60, dmg: 40, range: 10, cd: 1.8, r: 18, cost: 190, time: 12, splash: 40, bm: 2 },
+  ogre: { name: 'Огр', info: 'Удар по площади, тройной урон по зданиям.',
+    hp: 520, speed: 60, dmg: 40, range: 10, cd: 1.8, r: 18, cost: 190, time: 12, splash: 40, bm: 3 },
   // --- Чародеи ---
-  golem: { name: 'Голем', info: 'Каменный танк, сам восстанавливает здоровье.',
-    hp: 430, speed: 58, dmg: 20, range: 9, cd: 1.3, r: 16, cost: 130, time: 9, regen: 5 },
+  golem: { name: 'Голем', info: 'Каменный танк, сам восстанавливает здоровье. Кулаки крушат стены: +60% урона по зданиям.',
+    hp: 470, speed: 64, dmg: 24, range: 9, cd: 1.3, r: 16, cost: 130, time: 9, regen: 5, bm: 1.6 },
   pyromancer: { name: 'Пиромант', info: 'Огненные шары бьют по площади.',
-    hp: 75, speed: 80, dmg: 20, range: 175, cd: 1.7, r: 10, cost: 110, time: 8, proj: 300, pk: 'fire', splash: 46 },
+    hp: 85, speed: 80, dmg: 23, range: 185, cd: 1.7, r: 10, cost: 110, time: 8, proj: 300, pk: 'fire', splash: 46 },
   priest: { name: 'Жрец', info: 'Лечит раненых союзников рядом.',
-    hp: 80, speed: 85, dmg: 6, range: 150, cd: 1.0, r: 9, cost: 90, time: 7, proj: 380, pk: 'spark', heal: 16 },
+    hp: 80, speed: 85, dmg: 8, range: 150, cd: 1.0, r: 9, cost: 90, time: 7, proj: 380, pk: 'spark', heal: 19 },
   // --- Механисты ---
   drone: { name: 'Дрон', info: 'Дешёвый и быстрый, летает над препятствиями.',
-    hp: 45, speed: 135, dmg: 6, range: 110, cd: 0.45, r: 8, cost: 35, time: 3, proj: 520, pk: 'bullet', fly: true },
+    hp: 48, speed: 135, dmg: 6, range: 110, cd: 0.45, r: 8, cost: 35, time: 3, proj: 520, pk: 'bullet', fly: true },
   sniper: { name: 'Снайпер', info: 'Огромная дальность и урон, медленная перезарядка.',
-    hp: 65, speed: 78, dmg: 55, range: 330, cd: 2.6, r: 9, cost: 120, time: 9, proj: 950, pk: 'tracer' },
-  tank: { name: 'Танк', info: 'Броня, залп по площади, урон по зданиям ×2.2.',
-    hp: 480, speed: 62, dmg: 38, range: 200, cd: 2.2, r: 18, cost: 220, time: 13, proj: 380, pk: 'shell', splash: 42, bm: 2.2, armorR: 0.7 },
+    hp: 65, speed: 78, dmg: 55, range: 330, cd: 2.4, r: 9, cost: 120, time: 9, proj: 950, pk: 'tracer' },
+  tank: { name: 'Танк', info: 'Броня, залп по площади, урон по зданиям ×3.2.',
+    hp: 480, speed: 62, dmg: 38, range: 200, cd: 2.2, r: 18, cost: 220, time: 13, proj: 380, pk: 'shell', splash: 42, bm: 3.2, armorR: 0.7 },
   // --- Герои: по одному на фракцию, призываются в цитадели, растут в уровне и владеют способностью ---
-  paladin: { name: 'Паладин', hero: true, info: 'Герой Легиона. Латы вдвое снижают урон от снарядов.',
-    hp: 640, speed: 100, dmg: 36, range: 10, cd: 1.0, r: 14, cost: 300, time: 16, armorR: 0.5, regen: 3,
+  // герой — боец против войск, а не таран: по зданиям бьёт слабее (bm 0.6), в одиночку башню не возьмёт
+  paladin: { name: 'Паладин', hero: true, info: 'Герой Легиона. Молот бьёт по площади, латы вдвое снижают урон от снарядов.',
+    hp: 640, speed: 100, dmg: 36, range: 10, cd: 1.0, r: 14, cost: 300, time: 16, armorR: 0.5, regen: 3, splash: 32, bm: 0.6,
     abil: { key: 'light', name: 'Святой свет', info: 'Лечит союзников вокруг и обжигает врагов рядом.', cd: 14, r: 170, heal: 110, dmg: 45 } },
   warlord: { name: 'Вождь', hero: true, info: 'Герой Орды. Бьёт по площади и звереет, теряя здоровье.',
-    hp: 780, speed: 95, dmg: 44, range: 11, cd: 1.3, r: 16, cost: 300, time: 16, splash: 36, rage: true, bm: 1.5, regen: 3,
+    hp: 780, speed: 95, dmg: 44, range: 11, cd: 1.3, r: 16, cost: 300, time: 16, splash: 36, rage: true, regen: 3, bm: 0.6,
     abil: { key: 'stomp', name: 'Удар оземь', info: 'Ранит всех врагов вокруг и оглушает воинов на 2 секунды.', cd: 12, r: 120, dmg: 70, stun: 2 } },
   archmage: { name: 'Архимаг', hero: true, info: 'Герой Чародеев. Мощные чародейские заряды издалека.',
-    hp: 400, speed: 88, dmg: 38, range: 215, cd: 1.4, r: 11, cost: 300, time: 16, proj: 420, pk: 'arcane', regen: 2,
-    abil: { key: 'meteor', name: 'Метеор', info: 'Обрушивает метеор: огромный урон по площади, по зданиям ×1.5.', cd: 15, r: 95, dmg: 170, range: 330 } },
+    hp: 400, speed: 88, dmg: 38, range: 215, cd: 1.4, r: 11, cost: 300, time: 16, proj: 420, pk: 'arcane', regen: 2, bm: 0.6,
+    abil: { key: 'meteor', name: 'Метеор', info: 'Обрушивает метеор: огромный урон по площади.', cd: 15, r: 95, dmg: 170, range: 330 } },
   commander: { name: 'Командор', hero: true, info: 'Герой Механистов. Шагающая машина со скорострельными пушками.',
-    hp: 700, speed: 82, dmg: 20, range: 185, cd: 0.5, r: 16, cost: 300, time: 16, proj: 620, pk: 'bullet', armorR: 0.7, regen: 2,
-    abil: { key: 'rockets', name: 'Ракетный залп', info: 'Шесть ракет накрывают площадь, по зданиям ×1.5.', cd: 14, r: 46, dmg: 48, n: 6, spread: 75, range: 300 } },
+    hp: 700, speed: 82, dmg: 20, range: 185, cd: 0.5, r: 16, cost: 300, time: 16, proj: 620, pk: 'bullet', armorR: 0.7, regen: 2, bm: 0.6,
+    abil: { key: 'rockets', name: 'Ракетный залп', info: 'Шесть ракет накрывают площадь.', cd: 14, r: 46, dmg: 48, n: 6, spread: 75, range: 300 } },
 };
 const HERO_MAX = 5;
 
@@ -112,24 +131,24 @@ const UPGRADES = {
   arm: { name: 'Броня', icon: '🛡', info: '+15% к здоровью всех воинов за уровень.', cost: [150, 250, 380], time: [18, 26, 34] },
   eco: { name: 'Добыча', icon: '⛏', info: '+1 золото в секунду с каждой шахты за уровень.', cost: [180, 280, 400], time: [20, 28, 36] },
 };
-for (const k in UNITS) UNITS[k].aggro = Math.max(UNITS[k].range + 70, 230);
+for (const k in UNITS) { const u = UNITS[k]; u.aggro = Math.max(u.range + 70, 230); u.pop = u.hero || u.cost >= 100 ? 2 : 1; if (u.pop > 1 && !u.hero) u.info += ' Занимает 2 места в войске.'; }
 
 // atk: shot — одиночный выстрел, aura — жжёт всех в зоне, chain — цепная молния, lob — навесной залп (есть мёртвая зона)
 const BUILDINGS = {
   hq: { name: 'Цитадель', info: 'Главное здание. Потеряешь — проиграл.',
-    hp: 3000, r: 46, cost: 0, time: 0, income: 6, atk: 'shot', range: 230, dmg: 16, cd: 0.9, proj: 520, pk: 'bullet' },
+    hp: 3000, r: 46, cost: 0, time: 0, income: 6, atk: 'shot', range: 230, dmg: 22, cd: 0.9, proj: 520, pk: 'bullet' },
   mine: { name: 'Шахта', info: '+3 золота в секунду.',
     hp: 420, r: 26, cost: 150, time: 8, income: 3 },
   barracks: { name: 'Казарма', info: 'Обучает воинов.',
     hp: 950, r: 34, cost: 220, time: 12 },
   ballista: { name: 'Баллиста', info: 'Дальний точный выстрел по одной цели.',
-    hp: 520, r: 22, cost: 170, time: 10, atk: 'shot', range: 300, dmg: 42, cd: 1.3, proj: 640, pk: 'bolt', tower: true },
+    hp: 760, r: 22, cost: 170, time: 10, atk: 'shot', range: 300, dmg: 48, cd: 1.3, proj: 640, pk: 'bolt', tower: true },
   brazier: { name: 'Жаровня', info: 'Жжёт всех врагов в малой зоне вокруг себя.',
-    hp: 640, r: 22, cost: 160, time: 10, atk: 'aura', range: 150, dmg: 13, cd: 0.6, tower: true },
+    hp: 900, r: 22, cost: 160, time: 10, atk: 'aura', range: 150, dmg: 16, cd: 0.6, tower: true },
   obelisk: { name: 'Обелиск', info: 'Цепная молния перескакивает на 3 цели.',
-    hp: 430, r: 22, cost: 180, time: 10, atk: 'chain', range: 240, dmg: 22, cd: 1.2, tower: true },
+    hp: 640, r: 22, cost: 180, time: 10, atk: 'chain', range: 240, dmg: 30, cd: 1.2, tower: true },
   mortar: { name: 'Мортира', info: 'Навесной залп по площади на огромную дальность. Вблизи не стреляет.',
-    hp: 460, r: 22, cost: 190, time: 10, atk: 'lob', range: 430, minRange: 120, dmg: 46, cd: 2.8, proj: 260, pk: 'shell', splash: 62, tower: true },
+    hp: 660, r: 22, cost: 190, time: 10, atk: 'lob', range: 430, minRange: 120, dmg: 46, cd: 2.8, proj: 260, pk: 'shell', splash: 62, tower: true },
 };
 
 const DIFF = {
