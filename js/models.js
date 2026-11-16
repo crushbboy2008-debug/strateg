@@ -1321,7 +1321,7 @@ function instance(key, build) {
 const SK = {};
 // scale — рост воина в игре, делённый на 1000
 const SK_CFG = { swordsman: { scale: 0.030 }, archer: { scale: 0.029 }, paladin: { scale: 0.038 }, berserker: { scale: 0.031 }, axethrower: { scale: 0.030 },
-  ogre: { scale: 0.052 }, warlord: { scale: 0.045 }, golem: { scale: 0.040 }, pyromancer: { scale: 0.030 }, priest: { scale: 0.029 }, archmage: { scale: 0.037 }, sniper: { scale: 0.029 } };
+  ogre: { scale: 0.052 }, warlord: { scale: 0.045 }, golem: { scale: 0.040 }, pyromancer: { scale: 0.030 }, priest: { scale: 0.029 }, archmage: { scale: 0.037 }, sniper: { scale: 0.029 }, knight: { scale: 0.036 } };
 export const SKINNED_UNITS = Object.keys(SK_CFG);
 // Манеры движения (стойка, ходьба, удар для разных видов оружия) — общий файл с проверочными скриптами
 let STYLES = {};
@@ -1399,7 +1399,33 @@ function humanoidPose(st, e, t, dt) {
       o.quaternion.set(q[i] * v + q[i + 4] * w, q[i + 1] * v + q[i + 5] * w, q[i + 2] * v + q[i + 6] * w, q[i + 3] * v + q[i + 7] * w).normalize();
     }
   } else if (C && B.wpnR) { B.wpnR.quaternion.identity(); if (B.wpnL) B.wpnL.quaternion.identity(); }
-}function skinned(type) {
+}
+// Рыцарь на коне: конь скачет галопом, всадник сидит в седле, удар — выпад копьём. Те же формулы — в C:\AI\kpose.py.
+const GAIT = [['legBL', 0, 0.5], ['legBR', 0.6, 0.5], ['legFL', 2.4, 0.55], ['legFR', 3.0, 0.55]];
+function knightPose(st, e, t, dt) {
+  const S = st.style, B = st.bn, mv = st.mv, ph = st.ph, swing = e.swing || 0;
+  if (swing > (st.lastSw || 0) + 0.01) st.atk = 0;
+  st.lastSw = swing;
+  if (st.atk !== undefined && st.atk < 1) st.atk = Math.min(1, st.atk + dt / (S.dur || 0.5));
+  for (const [n, o, amp] of GAIT) {
+    const p = ph + o;
+    B[n + '_up'].rotation.set(0, 0, amp * Math.sin(p) * mv);
+    B[n + '_low'].rotation.set(0, 0, -Math.max(0, Math.cos(p)) * mv);
+  }
+  if (st.by0 === undefined) st.by0 = B.body.position.y;
+  B.body.position.y = st.by0 + 18 * Math.abs(Math.sin(ph + 1.2)) * mv;
+  B.body.rotation.set(0, 0, 0.07 * Math.sin(ph + 1.2) * mv);
+  B.neck.rotation.set(0, 0, -0.15 * Math.sin(ph + 1.2) * mv - 0.06 * mv + 0.03 * Math.sin(t * 1.3 + (e.id || 0)) * (1 - mv));
+  B.tail.rotation.set(0, 0, -(0.55 + 0.12 * Math.sin(ph * 2)) * mv - 0.1);
+  for (const n in S.seat) { const v = S.seat[n]; B[n].rotation.set(v[0], v[1], v[2]); }
+  B.torso.rotation.set(0, 0, -0.10 * mv - 0.04 * Math.sin(ph * 2) * mv); B.head.rotation.set(0, 0, 0); B.wpnR.quaternion.identity();
+  const C = S.clip;
+  if (C && st.atk !== undefined && st.atk < 1) {
+    const f = st.atk * (C.n - 1), i = Math.min(Math.floor(f), C.n - 2) * 4, w = f - i / 4, v = 1 - w;
+    for (const n in C.q) { const q = C.q[n], o = B[n]; if (!o) continue; o.quaternion.set(q[i] * v + q[i + 4] * w, q[i + 1] * v + q[i + 5] * w, q[i + 2] * v + q[i + 6] * w, q[i + 3] * v + q[i + 7] * w).normalize(); }
+  }
+}
+function skinned(type) {
   const d = SK[type], cfg = SK_CFG[type], g = new THREE.Group(), by = {};
   g.name = 'model'; g.scale.setScalar(cfg.scale);
   const bones = d.bones.map(b => { const o = new THREE.Bone(); o.name = b.n; by[b.n] = o; return o; });
@@ -1447,6 +1473,7 @@ export function makeProp(kind, facKey, fac) { return instance('prop|' + kind + '
 export function animate(m, e, t, dt) {
   const st = m.userData, unit = e.kind === 'unit';
   if (unit) { st.mv += ((e.moving ? 1 : 0) - st.mv) * Math.min(1, dt * 10); if (e.moving) st.ph += dt * st.rate; }
+  if (st.rig === 'horse') { knightPose(st, e, t, dt); return; }
   if (st.rig) { humanoidPose(st, e, t, dt); return; }
   const s = unit ? Math.max(0, Math.min(1, e.swing / 0.25)) : Math.max(0, Math.min(1, e.fire / 0.3));
   const sw = Math.sin(s * PI), wk = Math.sin(st.ph) * st.mv;
