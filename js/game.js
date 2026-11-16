@@ -11,7 +11,7 @@ function blankInput() { return { keys: {}, yaw: 0, aim: 0.7, lmb: false, rmb: fa
 // c — { faction, bot, team }. inp — откуда читается управление вселённым воином (у местного игрока — общий Input)
 function mkPlayer(i, c) {
   return { idx: i, faction: c.faction, fac: FACTIONS[c.faction], bot: !!c.bot, team: c.team, gold: START_GOLD, alive: true, income: 0, alarm: null, ai: { t: rand(0, 1), wave: 5 },
-    up: { atk: 0, arm: 0, eco: 0 }, research: null, heroLvl: 1, heroXp: 0, heroU: null, heroDeaths: 0, heroBack: 0, lost: 0, bl: 0, autoCast: true, poss: null, inp: i === G.human ? Input : blankInput(), nq: [] };
+    up: { atk: 0, arm: 0, eco: 0, fort: 0 }, research: null, heroLvl: 1, heroXp: 0, heroU: null, heroDeaths: 0, heroBack: 0, lost: 0, bl: 0, autoCast: true, poss: null, inp: i === G.human ? Input : blankInput(), nq: [] };
 }
 // Сообщение игроку: местному — сразу на экран, удалённому — уйдёт по сети
 function note(p, text) { if (p.idx === G.human) G.notes.push(text); else if (G.net === 'host' && !p.bot) p.nq.push(text); }
@@ -50,19 +50,22 @@ function newGame(cfg) {
 
 // Убранство базы: площадь под цитаделью, столбы по кругу, пара у ворот и разбросанная утварь.
 // Это не здания: воины их обходят, а при постройке здания на этом месте они убираются.
+// Расстановка: перед базой (в сторону врага, куда выходит армия) чисто — только пара ворот по краям;
+// лагерь — три группы по три предмета позади цитадели; внешние столбы тоже только с тыла.
 function baseDecor(p, x, y, a) {
   const add = (kind, px, py, r, face) => G.props.push({ id: G.nextId++, kind: 'prop', type: kind, fac: p.faction, owner: p.idx, x: px, y: py, r, face, dead: false, fire: 0 });
+  const inMap = (px, py) => px > 50 && py > 50 && px < WORLD.w - 50 && py < WORLD.h - 50;
   add('plaza', x, y, 0, Math.PI / 2);
   for (let k = 0; k < 4; k++) { const b = a + Math.PI / 4 + k * Math.PI / 2; add('post', x + Math.cos(b) * 73, y + Math.sin(b) * 73, 3, b); }
-  for (const s of [-1, 1]) add('gate', x + Math.cos(a + s * 0.42) * 185, y + Math.sin(a + s * 0.42) * 185, 8, a);
-  for (let k = 0; k < 11; k++) { const b = a + (k + 0.5) / 11 * TAU; if (angDiff(b, a) > 0.4) add('post', x + Math.cos(b) * 335, y + Math.sin(b) * 335, 3, b); }
-  const kinds = ['a', 'b', 'c'], rr = { a: 13, b: 8, c: 9 };
-  let n = 0, tries = 0;
-  while (n < 13 && tries++ < 400) {
-    const b = rand(0, TAU), d = rand(125, 300), px = x + Math.cos(b) * d, py = y + Math.sin(b) * d;
-    if (angDiff(b, a) < 0.4 || px < 50 || py < 50 || px > WORLD.w - 50 || py > WORLD.h - 50) continue;
-    if (G.props.some(q => q.owner === p.idx && Math.hypot(q.x - px, q.y - py) < 52)) continue;
-    add(kinds[n % 3], px, py, rr[kinds[n % 3]], rand(0, TAU)); n++;
+  for (const s of [-1, 1]) add('gate', x + Math.cos(a + s * 0.55) * 190, y + Math.sin(a + s * 0.55) * 190, 8, a);
+  for (let k = 0; k < 11; k += 2) { const b = a + (k + 0.5) / 11 * TAU, px = x + Math.cos(b) * 335, py = y + Math.sin(b) * 335; if (angDiff(b, a) > 1.4 && inMap(px, py)) add('post', px, py, 3, b); }
+  const back = a + Math.PI;
+  for (const off of [-1.05, 0, 1.05]) { // лагерь: шатёр в центре, по бокам — тренировочное место и склад
+    const b = back + off, cx = x + Math.cos(b) * 215, cy = y + Math.sin(b) * 215, face = Math.atan2(y - cy, x - cx), nx = -Math.sin(face), ny = Math.cos(face);
+    if (!inMap(cx, cy)) continue;
+    add('a', cx, cy, 13, face);
+    add('b', cx + nx * 40 + Math.cos(face) * 8, cy + ny * 40 + Math.sin(face) * 8, 8, face + rand(-0.4, 0.4));
+    add('c', cx - nx * 38 + Math.cos(face) * 6, cy - ny * 38 + Math.sin(face) * 6, 9, face + rand(-0.6, 0.6));
   }
 }
 
@@ -108,7 +111,7 @@ function canPlace(p, type, x, y) {
   for (const o of G.obstacles) if (Math.hypot(o.x - x, o.y - y) < o.r + r + 12) return 'Мешает препятствие';
   if (!near) return 'Стройте рядом со своими зданиями';
   if (type === 'mine' && countB(p, 'mine') >= MAX_MINES) return 'Максимум шахт: ' + MAX_MINES;
-  if (BUILDINGS[type].tower && countB(p, type) >= MAX_TOWERS) return 'Максимум башен: ' + MAX_TOWERS;
+  if (BUILDINGS[type].tower && countB(p, type) >= maxTowers(p)) return 'Максимум башен: ' + maxTowers(p) + (p.up.fort < UPGRADES.fort.cost.length ? ' (улучшение «Форты» добавит ещё)' : '');
   return '';
 }
 

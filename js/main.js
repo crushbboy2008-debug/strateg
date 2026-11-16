@@ -1,6 +1,7 @@
 // ---------- 3D-отрисовка (Three.js), камера, ввод и интерфейс ----------
 import * as THREE from '../lib/three.module.js';
 import { createEnvironment, buildTerrain, groundPatch } from './world.js';
+import { makeBaseDeco } from './basedeco.js';
 import { makeUnit, makeBuilding, makeObstacles, makeDecor, makeBaseWalls, makeProp, makeProj, animate, loadSkinned, loadStyles, SKINNED_UNITS, LIT, FLASH } from './models.js';
 import { createEffects } from './effects.js';
 import { portrait } from './portraits.js';
@@ -47,6 +48,7 @@ function setTerrain(hqs) {
   if (terrain) { scene.remove(terrain.mesh); terrain.dispose(); }
   terrain = buildTerrain(hqs, G.map);
   scene.add(terrain.mesh);
+  env.mood(G.map.mood); // небо, туман, вода и светлячки под настроение карты
   const s = G.map.sun || ['#ffe6bd', 3.3], h = G.map.hemi || ['#dcecff', '#7a8452', 1.5]; // свет под настроение карты
   sun.color.set(s[0]); sun.intensity = s[1]; hemi.color.set(h[0]); hemi.groundColor.set(h[1]); hemi.intensity = h[2];
 }
@@ -96,7 +98,8 @@ function buildObstacles(bases = G.players.map(p => ({ x: p.hq.x, y: p.hq.y, fac:
   for (const m of propMeshes) scene.remove(m.g);
   const avoid = G.obstacles.concat(bases.map(b => ({ x: b.x, y: b.y, r: 78 })), G.props.filter(q => q.r).map(q => ({ x: q.x, y: q.y, r: q.r + 6 })));
   natureGroups = [makeObstacles(G.obstacles, G.map), makeDecor(WORLD.w, WORLD.h, avoid, G.map),
-    makeBaseWalls(bases, WORLD.w, WORLD.h)]; // крепостные стены за базами — только украшение
+    makeBaseWalls(bases, WORLD.w, WORLD.h), // крепостные стены за базами — только украшение
+    makeBaseDeco(bases)]; // оформление базы: площадка и декор у каждой фракции свои (только картинка, в расчёт игры не входит)
   scene.add(...natureGroups);
   // убранство баз: отдельные модели, чтобы их можно было убрать при застройке
   propMeshes = G.props.map(q => {
@@ -180,6 +183,7 @@ function syncEnts(t, dt) {
     if (!g) { g = e.kind === 'unit' ? buildUnit(e) : buildBld(e); scene.add(g); entMesh.set(e, g); }
     g.userData.seen = frameId;
     g.position.set(e.x, 0, e.y);
+    g.visible = !fogHides(e); // туман войны: чужое вне обзора не рисуем
     const ud = g.userData, hero = e === G.possessed;
     ud.ring.visible = hero || sel.has(e);
     ud.ring.material = hero ? ringMatHero : ringMatSel;
@@ -214,6 +218,7 @@ function syncProjs(t) {
     if (!m) { m = makeProj(p.kind); scene.add(m); projMesh.set(p, m); }
     m.userData.seen = frameId;
     m.position.set(p.x, p.h, p.y);
+    m.visible = !Fog.on || fogSees(p.x, p.y);
     m.rotation.y = -p.ang;
     if (p.kind === 'axe') m.rotation.z = -t * 16;
   }
@@ -270,9 +275,83 @@ const rallyMark = flat(new THREE.RingGeometry(0.5, 1, 4), '#7dff9a', 0.9);
 const abilMark = flat(new THREE.RingGeometry(0.93, 1, 64), '#ff8a2a', 0.95), abilDisc = flat(new THREE.CircleGeometry(1, 48), '#ff8a2a', 0.16);
 const abilArea = a => a.key === 'rockets' ? a.spread + a.r : a.r; // радиус поражения способности
 
+// ================= Туман войны и разметка зоны стройки =================
+// Оба слоя — плоскости над землёй с картинкой, которую рисуем на canvas: левый верхний угол картинки = начало карты.
+function groundLayer(res, y, opacity) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = res;
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; m.position.y = y; m.visible = false; scene.add(m);
+  return { cv, g: cv.getContext('2d'), tex, m };
+}
+// Туман войны — только в сетевой игре: чужих воинов не видно, пока рядом нет своего воина или здания (союзники делятся обзором).
+// Это правило показа, а не симуляции: бой считается как раньше, скрытое просто не рисуется и не выбирается мышью.
+// Чужие здания остаются на виду после того, как их однажды увидели; цитадели видны всегда.
+const VIS_UNIT = 520, VIS_BLD = 620, FOG_PAD = 400; // обзор воина и здания; запас тумана за краем карты
+const Fog = { on: false, force: false, t: 0, vis: new WeakSet(), known: new WeakSet(), src: [], layer: groundLayer(256, 2.2, 1) };
+const fogHides = e => Fog.on && !Fog.vis.has(e) && e.team !== G.players[G.human].team;
+function fogSees(x, y) {
+  for (const s of Fog.src) { const R = s.kind === 'unit' ? VIS_UNIT : VIS_BLD, dx = s.x - x, dy = s.y - y; if (dx * dx + dy * dy < R * R) return true; }
+  return false;
+}
+function fogUpdate(dt) {
+  const on = G.running && (!!G.net || Fog.force) && !!G.players[G.human];
+  if (on !== Fog.on) { Fog.on = on; Fog.t = 0; Fog.layer.m.visible = on; if (on) { Fog.vis = new WeakSet(); Fog.known = new WeakSet(); } }
+  if (!on || (Fog.t -= dt) > 0) return;
+  Fog.t = 0.15;
+  const my = G.players[G.human].team, src = Fog.src = [];
+  for (const e of G.ents) if (!e.dead && e.team === my) src.push(e);
+  for (const e of G.ents) {
+    if (e.dead || e.team === my) continue;
+    let v = false;
+    for (const s of src) { const R = (s.kind === 'unit' ? VIS_UNIT : VIS_BLD) + e.r, dx = s.x - e.x, dy = s.y - e.y; if (dx * dx + dy * dy < R * R) { v = true; break; } }
+    if (e.kind === 'bld') { if (v || e.type === 'hq') Fog.known.add(e); v = Fog.known.has(e); }
+    if (v) Fog.vis.add(e); else Fog.vis.delete(e);
+  }
+  const { g, cv, tex, m } = Fog.layer, S = cv.width, span = WORLD.w + 2 * FOG_PAD, k = S / span;
+  m.scale.set(span, span, 1); m.position.set(WORLD.w / 2, 2.2, WORLD.h / 2);
+  g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, S, S); g.fillStyle = 'rgba(6, 8, 12, .52)'; g.fillRect(0, 0, S, S);
+  g.globalCompositeOperation = 'destination-out';
+  for (const s of src) {
+    const R = (s.kind === 'unit' ? VIS_UNIT : VIS_BLD) * k, x = (s.x + FOG_PAD) * k, y = (s.y + FOG_PAD) * k, gr = g.createRadialGradient(x, y, R * 0.78, x, y, R);
+    gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(x, y, R, 0, 7); g.fill();
+  }
+  tex.needsUpdate = true;
+}
+// Разметка «где можно строить», пока выбрана постройка: светлая граница по краю зоны и лёгкая заливка внутри.
+// Зона — как в canPlace: центр здания должен лежать не дальше BUILD_RADIUS от края любого своего достроенного здания;
+// вырезаны места, где новое здание встало бы слишком близко к уже стоящему.
+const Zone = { key: '', layer: groundLayer(1024, 0.9, 0.9), tmp: document.createElement('canvas') };
+Zone.tmp.width = Zone.tmp.height = 1024;
+function zoneUpdate() {
+  const p = G.players[G.human], show = G.running && !!p && !!UI.placing && !G.possessed, { g, cv, tex, m } = Zone.layer;
+  m.visible = show;
+  if (!show) return;
+  const blds = G.ents.filter(e => e.kind === 'bld' && !e.dead), mine = blds.filter(e => e.owner === p.idx && e.build >= 1);
+  const key = UI.placing + '|' + WORLD.w + '|' + blds.map(e => e.id).join(',') + '|' + mine.length;
+  if (key === Zone.key) return;
+  Zone.key = key;
+  const S = cv.width, k = S / WORLD.w, r = BUILDINGS[UI.placing].r, t = Zone.tmp.getContext('2d'), line = Math.max(2, 7 * k);
+  const circles = (c, list, rad) => { for (const e of list) { c.beginPath(); c.arc(e.x * k, e.y * k, Math.max(0, rad(e)) * k, 0, 7); c.fill(); } };
+  m.scale.set(WORLD.w, WORLD.h, 1); m.position.set(WORLD.w / 2, 0.9, WORLD.h / 2);
+  // заливка: объединение кругов одним тоном
+  t.globalCompositeOperation = 'source-over'; t.clearRect(0, 0, S, S); t.fillStyle = '#f6eeee'; circles(t, mine, e => BUILD_RADIUS + e.r);
+  // граница: то же объединение минус оно же, сжатое на толщину линии — остаётся только внешний контур
+  g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, S, S); g.fillStyle = '#f6eeee'; circles(g, mine, e => BUILD_RADIUS + e.r);
+  g.globalCompositeOperation = 'destination-out'; g.fillStyle = '#000'; circles(g, mine, e => BUILD_RADIUS + e.r - line / k);
+  g.globalCompositeOperation = 'destination-over'; g.globalAlpha = 0.13; g.drawImage(Zone.tmp, 0, 0); g.globalAlpha = 1;
+  g.globalCompositeOperation = 'destination-out'; circles(g, blds, e => e.r + r + 34);
+  const m30 = (r + 30) * k; // у самого края карты строить нельзя
+  g.fillRect(0, 0, S, m30); g.fillRect(0, S - m30, S, m30); g.fillRect(0, 0, m30, S); g.fillRect(S - m30, 0, m30, S);
+  g.globalCompositeOperation = 'source-over';
+  tex.needsUpdate = true;
+}
+
 function syncMarkers() {
   const me = G.players[G.human];
   ghost.visible = rangeRing.visible = minRing.visible = zoneDisc.visible = reticle.visible = rallyMark.visible = abilMark.visible = abilDisc.visible = false;
+  zoneUpdate();
   if (!G.running || !me) return;
   let zone = null;
   if (UI.placing && !G.possessed) {
@@ -328,9 +407,11 @@ let camSnap = true;
 function updateCamera(dt) {
   const c = UI.cam, u = G.possessed;
   if (u) {
-    const f = Input.yaw, D = 74 + u.r * 3, H = 54 + u.r * 2.2 + (u.fly ? 30 : 0);
+    // Свободный обзор: взгляд вверх-вниз (Input.aim) поднимает и опускает камеру и сдвигает точку, куда она смотрит.
+    // При aim 0.7 вид прежний; ниже — камера выше и смотрит под ноги, выше — ниже и смотрит к горизонту.
+    const f = Input.yaw, D = 74 + u.r * 3, H = (54 + u.r * 2.2 + (u.fly ? 30 : 0)) * (1 + (0.7 - Input.aim) * 0.9), L = 90 + (Input.aim - 0.7) * 130;
     wantPos.set(u.x - Math.cos(f) * D, H, u.y - Math.sin(f) * D);
-    wantLook.set(u.x + Math.cos(f) * 90, (u.fly ? 26 : 0) - 4, u.y + Math.sin(f) * 90);
+    wantLook.set(u.x + Math.cos(f) * L, (u.fly ? 26 : 0) - 4, u.y + Math.sin(f) * L);
     c.x = u.x; c.y = u.y;
   } else {
     const p = 0.92; // наклон RTS-камеры
@@ -359,7 +440,14 @@ function updateCamera(dt) {
 function camInput(dt) {
   const k = Input.keys, c = UI.cam;
   if (G.possessed) {
+    // Поворот: Q/E (стрелки заняты — ими воин ходит); взгляд выше-ниже — мышь или колесо
     Input.yaw += ((k.KeyE ? 1 : 0) - (k.KeyQ ? 1 : 0)) * 2.4 * dt;
+    // Если мышь не захвачена (так бывает во встроенных окнах), камеру ведёт положение курсора: у края экрана — поворот, выше и ниже центра — взгляд вверх и вниз
+    if (document.pointerLockElement !== cv && !UI.paused) {
+      const nx = (Input.sx - VW / 2) / (VW / 2), ny = (Input.sy - VH * 0.45) / (VH / 2), dz = 0.14, f = v => Math.abs(v) < dz ? 0 : Math.sign(v) * (Math.abs(v) - dz) / (1 - dz);
+      Input.yaw += f(nx) * 2.6 * dt;
+      Input.aim = Math.max(0, Math.min(1, Input.aim - f(ny) * 0.9 * dt));
+    }
     return;
   }
   const sp = c.dist * 1.1 * dt;
@@ -390,7 +478,7 @@ function entTop(e) {
 function pickEnt(sx, sy, filter) {
   let best = null, bd = Infinity;
   for (const e of G.ents) {
-    if (e.dead || !filter(e)) continue;
+    if (e.dead || !filter(e) || fogHides(e)) continue;
     const s = toScreen(e.x, entTop(e) * 0.45, e.y);
     if (!s) continue;
     const pr = e.r * pxPerUnit(e.x, e.y) * 1.3 + 8, d = Math.hypot(s.x - sx, s.y - sy);
@@ -405,7 +493,7 @@ function drawOverlay() {
   if (!G.running) return;
   const sel = new Set(UI.sel);
   for (const e of G.ents) {
-    if (e.dead) continue;
+    if (e.dead || fogHides(e)) continue;
     const constructing = e.kind === 'bld' && e.build < 1, training = e.kind === 'bld' && e.queue.length && e.owner === G.human;
     const isHero = e.kind === 'unit' && UNITS[e.type].hero;
     if (e.hp >= e.maxHp && !sel.has(e) && !constructing && !training && e !== G.possessed && !isHero) continue;
@@ -416,7 +504,7 @@ function drawOverlay() {
     octx.fillStyle = G.players[e.owner].fac.color; octx.fillRect(x, s.y, w * Math.max(0, e.hp / e.maxHp), hgt);
     if (isHero) { // герой: золотая рамка полоски и уровень
       octx.strokeStyle = '#ffd24a'; octx.lineWidth = 1; octx.strokeRect(x - 1.5, s.y - 1.5, w + 3, hgt + 3);
-      octx.font = 'bold 12px "Segoe UI", sans-serif'; octx.textAlign = 'center'; octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,.8)';
+      octx.font = 'bold 12px "Russo One", "Segoe UI", sans-serif'; octx.textAlign = 'center'; octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,.8)';
       const txt = '★ ' + G.players[e.owner].heroLvl;
       octx.strokeText(txt, s.x, s.y - 5); octx.fillStyle = '#ffd24a'; octx.fillText(txt, s.x, s.y - 5);
     }
@@ -431,7 +519,7 @@ function drawOverlay() {
     if (f.type !== 'num' || f.pid !== G.human) continue;
     const k = f.life / f.max, p = toScreen(f.x, f.h + (1 - k) * 28, f.y);
     if (!p) continue;
-    octx.globalAlpha = Math.min(1, k * 2); octx.font = 'bold 19px "Segoe UI", sans-serif'; octx.textAlign = 'center';
+    octx.globalAlpha = Math.min(1, k * 2); octx.font = 'bold 19px "Russo One", "Segoe UI", sans-serif'; octx.textAlign = 'center';
     octx.lineWidth = 4; octx.strokeStyle = 'rgba(0,0,0,.8)'; octx.strokeText(f.text, p.x, p.y);
     octx.fillStyle = '#ffe066'; octx.fillText(f.text, p.x, p.y); octx.globalAlpha = 1;
   }
@@ -447,8 +535,9 @@ function drawMini() {
   mctx.imageSmoothingEnabled = true; mctx.drawImage(terrain.mini, 0, 0, S, S);
   mctx.fillStyle = 'rgba(20,50,20,.75)';
   for (const o of G.obstacles) mctx.fillRect(o.x * k - 1.5, o.y * k - 1.5, 3, 3);
+  if (Fog.on) { const fc = Fog.layer.cv, q = fc.width / (WORLD.w + 2 * FOG_PAD); mctx.drawImage(fc, FOG_PAD * q, FOG_PAD * q, WORLD.w * q, WORLD.w * q, 0, 0, S, S); } // туман и на миникарте
   for (const e of G.ents) {
-    if (e.dead) continue;
+    if (e.dead || fogHides(e)) continue;
     mctx.fillStyle = G.players[e.owner].fac.color;
     const hero = e.kind === 'unit' && UNITS[e.type].hero;
     const s = e.kind === 'bld' ? (e.type === 'hq' ? 9 : 5) : hero ? 5 : 2.5;
@@ -578,7 +667,18 @@ function buildMenu() {
   const fig = (kind, t, name, tag, cls) => `<figure${cls ? ` class="${cls}"` : ''}><img src="${portrait(kind, t, fk)}" alt=""><figcaption>${name}<i>${tag}</i></figcaption></figure>`;
   info.style.setProperty('--c', sf.color);
   info.innerHTML = `<h2>${sf.name}</h2><p>${sf.motto}</p><div class="roster">${fig('unit', sf.hero, UNITS[sf.hero].name, 'герой', 'hero')}
-    ${sf.units.map(u => fig('unit', u, UNITS[u].name, 'воин')).join('')}${fig('bld', sf.tower, BUILDINGS[sf.tower].name, 'башня')}</div>`;
+    ${sf.units.map(u => fig('unit', u, UNITS[u].name, 'воин')).join('')}${fig('bld', sf.tower, BUILDINGS[sf.tower].name, 'башня')}</div><div class="udesc"></div>`;
+  // Короткое описание под рядом: наведите на воина, героя или башню (по умолчанию — герой)
+  const stat = d => `${d.hp ? 'Здоровье ' + d.hp : 'Прочность ' + d.hp}` + (d.dmg ? ` · урон ${d.dmg}` : '') + (d.range ? ` · ${d.proj || d.atk ? 'дальность ' + d.range : 'ближний бой'}` : '');
+  const desc = [UNITS[sf.hero], ...sf.units.map(u => UNITS[u]), BUILDINGS[sf.tower]].map((d, i, arr) => {
+    const hero = i === 0, tower = i === arr.length - 1;
+    const st = tower ? `Прочность ${d.hp} · урон ${d.dmg} · зона ${d.range}` : `Здоровье ${d.hp} · урон ${d.dmg} · ${d.proj ? 'дальность ' + d.range : 'ближний бой'} · ${d.cost} зол.`;
+    return `<b>${d.name}</b><span>${st}</span>${d.info}${hero ? `<em>Способность «${d.abil.name}»: ${d.abil.info}</em>` : ''}`;
+  });
+  const box = info.querySelector('.udesc'), figs = [...info.querySelectorAll('.roster figure')];
+  const show = i => { box.innerHTML = desc[i]; figs.forEach((f, j) => f.classList.toggle('on', j === i)); };
+  figs.forEach((f, i) => { f.onmouseenter = () => show(i); f.onclick = () => show(i); });
+  show(0);
   const mc = $('mapCards'), sizeName = m => m.size < 3000 ? 'Малая' : m.size < 4000 ? 'Средняя' : 'Большая';
   mc.innerHTML = '';
   for (const k in MAPS) {
@@ -621,7 +721,7 @@ function unitTip(t) {
 }
 function bldTip(t) {
   const d = BUILDINGS[t];
-  return `<b>${d.name}</b><div class="tc">${COIN}${buildCost(me(), t)} · стройка ${d.time} с${d.tower ? ' · построено ' + countB(me(), t) + ' из ' + MAX_TOWERS : ''}</div>
+  return `<b>${d.name}</b><div class="tc">${COIN}${buildCost(me(), t)} · стройка ${d.time} с${d.tower ? ' · построено ' + countB(me(), t) + ' из ' + maxTowers(me()) : ''}</div>
     <div class="ts">Прочность ${d.hp}${d.dmg ? ` · Урон ${d.dmg} · Зона ${d.range}` : ''}</div><p>${d.info}</p>`;
 }
 
@@ -685,7 +785,7 @@ function buildHud() {
     const d = UPGRADES[k], b = document.createElement('button');
     b.className = 'up';
     b.innerHTML = `<span class="ui">${d.icon}</span><span class="un">${d.name}</span><span class="pips">${d.cost.map(() => '<i></i>').join('')}</span><span class="cs">${COIN}<em></em></span><span class="prog"><i></i></span>`;
-    b.onclick = () => research(k); b.onmouseenter = () => showTip(b, upTip(k) + `<div class="ts">Клавиша ${'RTY'[i]}</div>`); b.onmouseleave = hideTip;
+    b.onclick = () => research(k); b.onmouseenter = () => showTip(b, upTip(k) + `<div class="ts">Клавиша ${'RTYU'[i]}</div>`); b.onmouseleave = hideTip;
     $('upBtns').appendChild(b); upEls[k] = b;
   });
   $('foes').innerHTML = G.players.filter(q => q.idx !== G.human).map(q => `<div class="foe" id="foe${q.idx}" style="--c:${q.fac.color}" title="${q.team === p.team ? 'Союзник' : 'Противник'}">${q.team === p.team ? '🤝 ' : ''}${q.fac.name}<div class="fhp"><i></i></div></div>`).join('');
@@ -745,7 +845,7 @@ function hudTick(dt) {
     const t = buildDefs[i], c = buildCost(p, t);
     el.querySelector('em').textContent = c;
     // !! обязательно: у шахты и казармы поля tower нет, а toggle с undefined просто переключает класс на каждом тике — кнопка мигала
-    el.classList.toggle('off', p.gold < c || !!(BUILDINGS[t].tower && countB(p, t) >= MAX_TOWERS));
+    el.classList.toggle('off', p.gold < c || !!(BUILDINGS[t].tower && countB(p, t) >= maxTowers(p)));
     el.classList.toggle('active', UI.placing === t);
   });
   const queued = {}, prog = {};
@@ -816,7 +916,9 @@ function possess(u) {
   Input.yaw = u.face; Input.aim = 0.7; Input.lmb = Input.rmb = false;
   setPoss(u);
   UI.sel = [u]; UI.placing = null; UI.drag = null; UI.locked = false; hudT = 0;
+  Input.sx = VW / 2; Input.sy = VH * 0.45; // курсор в центре — камера стоит ровно
   lock();
+  setTimeout(() => { if (G.possessed === u && document.pointerLockElement !== cv) toast('Мышь не захвачена: поворот — курсором у краёв экрана или клавишами Q и E', true); }, 500);
 }
 function unpossess() {
   setPoss(null);
@@ -953,6 +1055,7 @@ window.addEventListener('keydown', e => {
     case 'KeyR': if (!G.possessed) research('atk'); break;
     case 'KeyT': if (!G.possessed) research('arm'); break;
     case 'KeyY': if (!G.possessed) research('eco'); break;
+    case 'KeyU': if (!G.possessed) research('fort'); break;
     case 'KeyG': if (!G.possessed) repairKey(); break;
     case 'KeyV': if (!G.possessed) castKey(e.shiftKey); break;
     case 'KeyF':
@@ -1087,7 +1190,8 @@ function frame(ts) {
     if (!G.over) shownEnd = false;
   }
   if (G.running && G.over && !shownEnd) { shownEnd = true; showEnd(); }
-  UI.sel = UI.sel.filter(e => !e.dead);
+  fogUpdate(dt);
+  UI.sel = UI.sel.filter(e => !e.dead && !fogHides(e));
   if (G.shakes && G.shakes.length) {
     const reach = G.possessed ? 520 : UI.cam.dist * 1.1;
     for (const sh of G.shakes) UI.shake = Math.max(UI.shake, sh.amp * Math.max(0, 1 - Math.hypot(sh.x - camLook.x, sh.y - camLook.z) / reach));
@@ -1109,7 +1213,7 @@ function frame(ts) {
 
 // Фон меню: пустая карта с медленным облётом
 UI.cam.x = WORLD.w / 2; UI.cam.y = WORLD.h / 2; UI.cam.dist = 1500;
-window.GameDebug = { THREE, scene, camera, renderer, possess, unpossess, groundAt, toScreen, entMesh };
+window.GameDebug = { THREE, scene, camera, renderer, possess, unpossess, groundAt, toScreen, entMesh, Fog }; // Fog.force = true включает туман и в одиночной игре (для проверки)
 // Готовые модели со скелетом; если файл не загрузился, воин останется прежним, собранным из фигур
 await loadStyles().catch(e => console.warn('Манеры движения не загружены:', e.message));
 await Promise.all(SKINNED_UNITS.map(t => loadSkinned(t).catch(e => console.warn('Модель не загружена:', t, e.message))));

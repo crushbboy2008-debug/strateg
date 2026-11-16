@@ -41,11 +41,13 @@ const MAPS = {
     rock: ['#8e939a', '#757a82', '#f4f7fb'],
     decor: { tuft: ['#dfe8ee', '#c9d6de', '#8aa08f'], flower: null, stone: ['#8e939a', '#f4f7fb'], bush: ['#e6edf2', '#cfdbe3'] },
     sun: ['#fff4e6', 3.0], hemi: ['#e8f2ff', '#b8c4d0', 1.7], thumb: ['#eef2f6', '#c2ced8', '#8e939a'] },
-  forest: { name: 'Тёмная чаща', info: 'Огромная карта в густом лесу. Долгая партия.', size: 4200, lay: 'corner', obst: 240, gap: 52, treeP: 0.9, trees: ['fir', 'leaf', 'fir'],
-    pal: { g1: [80, 134, 62], g2: [52, 100, 48], dry: [96, 120, 60], dirt: [112, 88, 60], road: [150, 122, 88], sand: [222, 204, 152] },
-    greens: ['#24552a', '#2c6430', '#1f4a2a', '#356f33'],
-    decor: { tuft: ['#3f7a34', '#4f8f3a', '#356a2c'], flower: ['#f1f1f1', '#c9a0f0', '#f4e36a', '#f1f1f1'], stone: ['#7c7e80', '#6a6c6e'], bush: ['#2f6b2a', '#3a7a30'] },
-    sun: ['#ffcf98', 2.8], hemi: ['#cfe0f5', '#5a6a44', 1.25], thumb: ['#3f7a34', '#24552a', '#967a58'] },
+  // Сумрачный болотный лес: только оформление (свет, туман, земля с чёрными лужами, мёртвые деревья, грибы, светлячки) — размеры и правила те же
+  forest: { name: 'Тёмная чаща', info: 'Огромный сумрачный лес: болота, туман и мёртвые деревья. Долгая партия.', size: 4200, lay: 'corner', obst: 240, gap: 52, treeP: 0.9, trees: ['fir', 'dead', 'fir', 'dead', 'leaf'],
+    pal: { g1: [88, 118, 66], g2: [54, 86, 54], dry: [112, 106, 62], dirt: [102, 78, 54], road: [150, 124, 90], sand: [122, 114, 80] }, bog: [38, 64, 62],
+    greens: ['#1b3d33', '#234a39', '#16322a', '#2c5842'], rock: ['#5a645f', '#454e4a', '#4c7a3e'],
+    decor: { tuft: ['#2f5a3a', '#3b6b40', '#27493a'], flower: null, mush: ['#21d6a0', '#8a5cff', '#6fe83a'], stone: ['#5a645f', '#454e4a'], bush: ['#21402f', '#2a5238'] },
+    mood: { horizon: '#6f8d84', zenith: '#22343a', fog: [900, 4200], water: '#2c4a43', bed: '#4a4e3c', cloud: '#6a7c7c', fireflies: 420 },
+    sun: ['#b9d6d8', 3.1], hemi: ['#9dbcc4', '#3a4a2c', 1.6], thumb: ['#4a6e48', '#234a39', '#7a7a52'] },
 };
 // Цвет утоптанной земли на базе каждой фракции
 const BASE_GROUND = { legion: [178, 168, 148], horde: [106, 72, 52], arcane: [158, 146, 186], mech: [100, 103, 108] };
@@ -89,11 +91,11 @@ const UNITS = {
     hp: 260, speed: 150, dmg: 22, range: 10, cd: 1.2, r: 13, cost: 145, time: 9, charge: true, trample: 34, bm: 1.6 },
   // --- Орда ---
   berserker: { name: 'Берсерк', info: 'Ярость: чем меньше здоровья, тем быстрее бьёт.',
-    hp: 125, speed: 105, dmg: 13, range: 8, cd: 0.85, r: 10, cost: 55, time: 4.5, rage: true },
+    hp: 125, speed: 105, dmg: 13, range: 8, cd: 0.85, r: 10, cost: 50, time: 4.5, rage: true },
   axethrower: { name: 'Метатель', info: 'Мощные броски топоров на средней дистанции.',
-    hp: 85, speed: 88, dmg: 24, range: 115, cd: 1.4, r: 10, cost: 75, time: 6, proj: 340, pk: 'axe' },
+    hp: 85, speed: 88, dmg: 24, range: 135, cd: 1.4, r: 10, cost: 65, time: 6, proj: 340, pk: 'axe' },
   ogre: { name: 'Огр', info: 'Удар по площади, тройной урон по зданиям.',
-    hp: 520, speed: 60, dmg: 40, range: 10, cd: 1.8, r: 18, cost: 190, time: 12, splash: 40, bm: 3 },
+    hp: 520, speed: 60, dmg: 40, range: 10, cd: 1.8, r: 18, cost: 160, time: 12, splash: 40, bm: 3 },
   // --- Чародеи ---
   golem: { name: 'Голем', info: 'Каменный танк, сам восстанавливает здоровье. Кулаки крушат стены: +60% урона по зданиям.',
     hp: 470, speed: 64, dmg: 24, range: 9, cd: 1.3, r: 16, cost: 130, time: 9, regen: 5, bm: 1.6 },
@@ -130,7 +132,9 @@ const UPGRADES = {
   atk: { name: 'Оружие', icon: '⚔', info: '+15% к урону всех воинов за уровень.', cost: [150, 250, 380], time: [18, 26, 34] },
   arm: { name: 'Броня', icon: '🛡', info: '+15% к здоровью всех воинов за уровень.', cost: [150, 250, 380], time: [18, 26, 34] },
   eco: { name: 'Добыча', icon: '⛏', info: '+1 золото в секунду с каждой шахты за уровень.', cost: [180, 280, 400], time: [20, 28, 36] },
+  fort: { name: 'Форты', icon: '🏰', info: '+1 к лимиту оборонительных башен за уровень (было 3, станет до 6).', cost: [200, 320, 460], time: [22, 30, 38] },
 };
+function maxTowers(p) { return MAX_TOWERS + ((p.up && p.up.fort) || 0); }
 for (const k in UNITS) { const u = UNITS[k]; u.aggro = Math.max(u.range + 70, 230); u.pop = u.hero || u.cost >= 100 ? 2 : 1; if (u.pop > 1 && !u.hero) u.info += ' Занимает 2 места в войске.'; }
 
 // atk: shot — одиночный выстрел, aura — жжёт всех в зоне, chain — цепная молния, lob — навесной залп (есть мёртвая зона)

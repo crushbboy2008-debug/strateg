@@ -91,11 +91,46 @@ export function createEnvironment(scene) {
   clouds.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = false; o.material = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, fog: false }); } });
   scene.add(clouds);
 
+  // ---- настроение карты: цвет неба, густота тумана, вода, облака, светлячки (без mood — обычный день) ----
+  const paintDome = (hz, zn) => {
+    const ch = new THREE.Color(hz), cz = new THREE.Color(zn), c = new THREE.Color(), ca = dg.attributes.color;
+    for (let i = 0; i < pos.count; i++) { c.copy(ch).lerp(cz, Math.pow(Math.max(0, pos.getY(i) / R), 0.55)); ca.setXYZ(i, c.r, c.g, c.b); }
+    ca.needsUpdate = true;
+  };
+  const dot = canvasTex(64, (g, s) => {
+    const gr = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.3, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, s, s);
+  });
+  let flies = null, fly = null;
+  const defaults = { horizon: HORIZON, zenith: ZENITH, fog: [2600, 8200], water: '#3d9bcb', bed: '#a69c76', cloud: '#ffffff' };
+  function mood(cfg) {
+    const m = { ...defaults, ...(cfg || {}) };
+    paintDome(m.horizon, m.zenith);
+    scene.background.set(m.horizon); scene.fog.color.set(m.horizon); scene.fog.near = m.fog[0]; scene.fog.far = m.fog[1];
+    water.material.color.set(m.water); water.material.opacity = cfg ? 0.92 : 0.8; bed.material.color.set(m.bed);
+    clouds.traverse(o => { if (o.isMesh) o.material.color.set(m.cloud); });
+    if (flies) { scene.remove(flies); flies.geometry.dispose(); flies = null; }
+    if (m.fireflies) { // светлячки: мягкие точки над землёй, чуть покачиваются и мерцают
+      const n = Math.round(m.fireflies * (W * H) / (4200 * 4200)), p = new Float32Array(n * 3), base = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { base[i * 3] = Math.random() * W; base[i * 3 + 1] = 14 + Math.random() * 55; base[i * 3 + 2] = Math.random() * H; }
+      p.set(base);
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(p, 3));
+      flies = new THREE.Points(geo, new THREE.PointsMaterial({ map: dot, color: '#a8e04a', size: 7, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+      flies.frustumCulled = false; scene.add(flies); fly = { base, n };
+    }
+  }
   return {
+    mood,
     update(t, camera) {
       dome.position.set(camera.position.x, 0, camera.position.z);
       waves.offset.set(t * 0.012, t * 0.007);
       clouds.rotation.y = t * 0.004;
+      if (flies) {
+        const a = flies.geometry.attributes.position, b = fly.base;
+        for (let i = 0; i < fly.n; i++) { const j = i * 3, s = t * 0.5 + i; a.array[j] = b[j] + Math.sin(s * 1.3) * 14; a.array[j + 1] = b[j + 1] + Math.sin(s * 1.9) * 7; a.array[j + 2] = b[j + 2] + Math.cos(s * 1.1) * 14; }
+        a.needsUpdate = true; flies.material.opacity = 0.55 + Math.sin(t * 2.3) * 0.25;
+      }
     },
   };
 }
@@ -117,7 +152,7 @@ const PAL = { g1: [112, 172, 78], g2: [80, 140, 58], dry: [164, 172, 86], dirt: 
 // hqs — цитадели { x, y, ground } (ground — цвет земли базы фракции), map — описание карты из MAPS
 export function buildTerrain(hqs, map) {
   W = WORLD.w; H = WORLD.h;
-  const { g1: G1, g2: G2, dry: DRY, dirt: DIRT, road: ROAD, sand: SAND } = (map && map.pal) || PAL;
+  const { g1: G1, g2: G2, dry: DRY, dirt: DIRT, road: ROAD, sand: SAND } = (map && map.pal) || PAL, BOG = map && map.bog; // BOG — цвет тёмных луж на болотных картах
   const [ox, oy] = G.seed || [Math.random() * 100, Math.random() * 100], center = { x: W / 2, y: H / 2 };
   const segs = [];
   hqs.forEach((a, i) => {
@@ -142,6 +177,7 @@ export function buildTerrain(hqs, map) {
     let c = mix(G2, G1, sstep(0.3, 0.7, n));
     c = mix(c, DRY, sstep(0.55, 0.75, fbm(x / 430 + 31 + ox, y / 430 + oy)) * 0.65);
     const k = 0.92 + 0.16 * n2; c = [c[0] * k, c[1] * k, c[2] * k];
+    if (BOG) c = mix(c, BOG, sstep(0.55, 0.63, fbm(x / 210 + 61 + ox, y / 210 + 13 + oy)) * 0.85); // лужи: дороги и земля баз потом ложатся поверх
     for (const q of hqs) { const dq = Math.hypot(x - q.x, y - q.y) + (n2 - 0.5) * 90; if (dq < 400) { const gc = q.ground || DIRT; c = mix(c, [gc[0] * k, gc[1] * k, gc[2] * k], (1 - sstep(130, 380, dq)) * 0.88); } }
     if (segs.length) {
       const rd = roadDist(x, y) + (n2 - 0.5) * 22;

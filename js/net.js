@@ -228,7 +228,7 @@ const Net = {
     }
     for (const q of G.projs) p.push([q.id || (q.id = G.nextId++), q.kind, r1(q.x), r1(q.y), r1(q.h), r2(q.ang || 0), q.lob ? 1 : 0]);
     const pl = G.players.map(q => [Math.floor(q.gold), r1(q.income), q.alive ? 1 : 0, q.up.atk, q.up.arm, q.up.eco, q.research ? [q.research.key, r1(q.research.t), q.research.time] : 0,
-      q.heroLvl, Math.floor(q.heroXp), q.heroDeaths, q.heroU && !q.heroU.dead ? q.heroU.id : 0, q.alarm ? [Math.round(q.alarm.x), Math.round(q.alarm.y), r1(q.alarm.t)] : 0, q.lost, q.bl, q.bot ? 1 : 0, q.autoCast ? 1 : 0, r1(q.heroBack)]);
+      q.heroLvl, Math.floor(q.heroXp), q.heroDeaths, q.heroU && !q.heroU.dead ? q.heroU.id : 0, q.alarm ? [Math.round(q.alarm.x), Math.round(q.alarm.y), r1(q.alarm.t)] : 0, q.lost, q.bl, q.bot ? 1 : 0, q.autoCast ? 1 : 0, r1(q.heroBack), q.up.fort || 0]);
     const ev = G.evq.splice(0).map(e => e.map(v => (typeof v === 'number' ? r1(v) : v)));
     return { t: 's', T: r2(G.time), u, b, p, pl, ev, dp: G.props.filter(q => q.dead).map(q => q.id), w: G.winTeam === undefined ? null : G.winTeam };
   },
@@ -341,7 +341,7 @@ const Net = {
       p.research = a[6] ? { key: a[6][0], t: a[6][1], time: a[6][2] } : null;
       p.heroLvl = a[7]; p.heroXp = a[8]; p.heroDeaths = a[9]; p.heroU = byId.get(a[10]) || null;
       p.alarm = a[11] ? { x: a[11][0], y: a[11][1], t: a[11][2] } : null;
-      p.lost = a[12]; p.bl = a[13]; p.bot = !!a[14]; p.autoCast = !!a[15]; p.heroBack = a[16] || 0;
+      p.lost = a[12]; p.bl = a[13]; p.bot = !!a[14]; p.autoCast = !!a[15]; p.heroBack = a[16] || 0; p.up.fort = a[17] || 0;
     });
     for (const id of s.dp) { const q = this.props.get(id); if (q) q.dead = true; }
     for (const ev of s.ev) { // эффекты и звуки, случившиеся на хосте

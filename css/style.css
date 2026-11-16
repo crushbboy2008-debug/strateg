@@ -203,11 +203,11 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 2
 .heroBtn .q { color: #ffd866; }
 .heroBtn.have .cs { visibility: hidden; }
 .heroBtn.have .nm { bottom: 8px; }
-.ups { display: flex; flex-direction: column; gap: 3px; width: 124px; }
-.up { position: relative; flex: 1; display: flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--key-line); border-bottom: 2px solid var(--key-lo); background: linear-gradient(#4a525b, #23272c); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2);
+.ups { display: flex; flex-direction: column; gap: 2px; width: 124px; }
+.up { position: relative; flex: 1; min-height: 0; line-height: 1; display: flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--key-line); border-bottom: 2px solid var(--key-lo); background: linear-gradient(#4a525b, #23272c); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2);
   overflow: hidden; font-size: 9.5px; font-weight: 600; text-align: left; white-space: nowrap; text-shadow: 0 1px 0 rgba(0, 0, 0, .7); }
 .up:hover { border-color: var(--gold-hi); background: linear-gradient(#5b646f, #2c3138); }
-.up .ui { width: 16px; text-align: center; font-size: 13px; }
+.up .ui { width: 14px; text-align: center; font-size: 11px; }
 .up .un { flex: 1; }
 .up .pips { display: flex; gap: 2px; }
 .up .pips i { width: 5px; height: 5px; background: #14171a; box-shadow: 0 0 0 1px #6b7580; transform: rotate(45deg); margin: 0 1px; }
@@ -288,6 +288,14 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 2
 .roster img { display: block; width: 100%; aspect-ratio: 1; }
 .roster figcaption { font-size: 10.5px; line-height: 1.2; color: #cfcfd5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .roster figcaption i { display: block; font-style: normal; font-size: 9.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); }
+.roster figure { cursor: default; transition: transform .1s; }
+.roster figure:hover, .roster figure.on { transform: translateY(-3px); }
+.roster figure.on { box-shadow: 0 0 0 1px var(--gold), 0 4px 10px rgba(0, 0, 0, .5); }
+/* короткое описание выбранной в ряду единицы: имя и цифры сверху, текст ниже, у героя ещё способность */
+.udesc { max-width: 500px; min-height: 66px; margin: 10px auto 0; padding: 7px 12px 8px; text-align: left; font-size: 11px; line-height: 1.4; color: #d3d1ca; background: rgba(12, 12, 15, .82); border: 1px solid #3a3a42; border-left: 3px solid var(--c); text-shadow: 0 1px 2px #000; }
+.udesc b { color: var(--gold-hi); font-size: 12.5px; margin-right: 8px; }
+.udesc span { display: block; margin: 1px 0 3px; font-size: 10px; color: #aeb3ba; letter-spacing: .02em; }
+.udesc em { display: block; margin-top: 3px; font-style: normal; color: #e3d7a8; }
 .roster .hero { flex-grow: 1.15; max-width: 90px; box-shadow: 0 0 0 1px var(--brass), inset 0 0 0 1px rgba(170, 182, 194, .3), 0 4px 10px rgba(0, 0, 0, .5); }
 .roster .hero figcaption { color: var(--gold-hi); font-weight: 700; }
 .roster .hero figcaption i { color: var(--gold); font-weight: 400; }

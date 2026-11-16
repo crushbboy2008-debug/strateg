@@ -1507,6 +1507,15 @@ export function makeObstacles(list, map = {}) {
           .add(C(r * 0.11, r * 0.11, r * 0.4, 6), cg, [-r * 0.3, h * 0.66, 0], [0, 0, PI / 2]).add(C(r * 0.11, r * 0.12, r * 0.5, 6), cg, [-r * 0.46, h * 0.66 + r * 0.22, 0]).add(S(r * 0.11, 6, 4), cg, [-r * 0.46, h * 0.66 + r * 0.47, 0])
           .add(DOD(r * 0.36), '#c08a5a', [r * 0.5, r * 0.12, r * 0.55], [k, 1, 0], [1, 0.6, 1]).add(DOD(r * 0.28), '#a8744a', [-r * 0.6, r * 0.1, -r * 0.4], [2, k, 0], [1, 0.6, 1])
           .add(ICO(r * 0.3, 0), '#b7a55a', [-r * 0.45, r * 0.18, r * 0.55], [k, 0, 0], [1, 0.6, 1]).add(ICO(r * 0.24, 0), '#a89a52', [r * 0.55, r * 0.14, -r * 0.5], [0, k, 0], [1, 0.6, 1]);
+      } else if (o.kind === 'dead') { // мёртвое корявое дерево с голыми ветвями и мхом у корней
+        const h = r * (2.1 + k * 0.9), bark = k < 0.5 ? '#4b4339' : '#3d3830';
+        q.add(C(r * 0.1, r * 0.2, h, 6), bark, [0, h / 2, 0], [0.06 * (k - 0.5), 0, 0.1 * (0.5 - k)]);
+        for (let i = 0; i < 4; i++) {
+          const a = i * 1.7 + k * 5, y = h * (0.45 + i * 0.13), l = r * (0.9 - i * 0.12);
+          q.add(C(r * 0.03, r * 0.07, l, 4), bark, [Math.cos(a) * l * 0.38, y + l * 0.3, Math.sin(a) * l * 0.38], [Math.sin(a) * 0.9, 0, -Math.cos(a) * 0.9])
+            .add(C(r * 0.02, r * 0.04, l * 0.6, 4), bark, [Math.cos(a) * l * 0.8, y + l * 0.62, Math.sin(a) * l * 0.8], [Math.sin(a) * 0.35, 0, -Math.cos(a) * 0.35]);
+        }
+        q.add(C(r * 0.03, r * 0.05, h * 0.35, 4), bark, [0, h * 1.08, 0]).add(ICO(r * 0.3, 0), '#34502f', [r * 0.12, r * 0.12, r * 0.1], [k, 0, 0], [1.4, 0.5, 1.2]);
       } else if (o.kind ? o.kind === 'fir' : o.tree && k < 0.55) { // ель
         const g = greens[Math.floor(k * 7) % 3];
         q.add(C(r * 0.11, r * 0.16, r * 0.7, 6), '#5d3f25', [0, r * 0.35, 0]);
@@ -1538,6 +1547,10 @@ export function makeDecor(w, h, avoid, map = {}) {
     const x = rnd(10, w - 10), y = rnd(10, h - 10), t = Math.random();
     if (!free(x, y, 6)) continue;
     if (t < 0.62) { const s = rnd(0.7, 1.5); for (let j = 0; j < 3; j++) p.add(CN(1.3 * s, 6 * s, 3), tuft[(i + j) % 3], [x + (j - 1) * 2 * s, 3 * s, y + (j % 2) * 1.5], [(j - 1) * 0.25, j, (j - 1) * 0.2]); }
+    else if (t < 0.8 && dc.mush) { // светящиеся грибы: кучка из трёх, шляпки горят сами по себе
+      for (let j = 0; j < 3; j++) { const s = rnd(1.4, 3), mx = x + (j - 1) * 3.2 + rnd(-1, 1), mz = y + (j % 2) * 2.4 + rnd(-1, 1), c = dc.mush[(i + j) % dc.mush.length];
+        p.add(C(0.45 * s, 0.6 * s, 2.6 * s, 5), '#cfc9b0', [mx, 1.3 * s, mz]).glow(DM(1.7 * s, 7), c, [mx, 2.5 * s, mz], Z3, [1, 0.85, 1]); }
+    }
     else if (t < 0.8 && flowers) { p.add(C(0.2, 0.2, 4, 3), tuft[2], [x, 2, y]).add(OCT(1.3), flowers[i % 4], [x, 4.6, y]); }
     else if (t < 0.93) p.add(DOD(rnd(1.5, 4)), stone[i % 2], [x, 0.8, y], [i, i * 2, 0], [1, 0.6, 1]);
     else if (free(x, y, 16)) { const s = rnd(5, 9); p.add(ICO(s, 0), bush[0], [x, s * 0.5, y], [i, 0, 0], [1, 0.7, 1]).add(ICO(s * 0.7, 0), bush[1], [x + s * 0.7, s * 0.4, y + s * 0.3], [0, i, 0], [1, 0.7, 1]); }
