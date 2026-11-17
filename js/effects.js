@@ -51,7 +51,8 @@ const GEO = {
 };
 const UP = new THREE.Vector3(0, 1, 0), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _d = new THREE.Vector3();
 
-export function createEffects(scene, renderer, camera) {
+// fogged(x, y) — true, если точка скрыта туманом войны: там частицы, вспышки и молнии не рисуем, чтобы они не выдавали врага
+export function createEffects(scene, renderer, camera, fogged = () => false) {
   const normal = makePoints(false), glow = makePoints(true);
   scene.add(normal.pts, glow.pts);
   const lights = [0, 1, 2].map(() => { const l = new THREE.PointLight('#ffa040', 0, 520, 1); scene.add(l); return l; });
@@ -101,6 +102,7 @@ export function createEffects(scene, renderer, camera) {
       default: return null;
     }
     m.userData.mat = mat;
+    if (Math.abs(m.rotation.x + PI / 2) < 1e-3) m.renderOrder = 11; // плоские эффекты на земле (кольца, следы) — поверх оформления баз
     return m;
   }
   function drop(m) { scene.remove(m); m.userData.mat.dispose(); if (m.userData.core) m.userData.core.dispose(); }
@@ -113,7 +115,7 @@ export function createEffects(scene, renderer, camera) {
       normal.n = glow.n = 0;
       for (const p of G.parts) {
         const b = p.add ? glow : normal;
-        if (b.n >= MAX) continue;
+        if (b.n >= MAX || fogged(p.x, p.y)) continue;
         const i = b.n++, c = rgb(p.color), k = p.life / p.max;
         b.pos[i * 3] = p.x; b.pos[i * 3 + 1] = p.h + 1.5; b.pos[i * 3 + 2] = p.y;
         b.col[i * 4] = c[0]; b.col[i * 4 + 1] = c[1]; b.col[i * 4 + 2] = c[2];
@@ -129,7 +131,9 @@ export function createEffects(scene, renderer, camera) {
       for (const l of lights) l.intensity = 0;
       for (const f of G.fx) {
         const k = f.life / f.max;
+        const hid = !f.local && fogged(f.x1 !== undefined ? f.x1 : f.x, f.y1 !== undefined ? f.y1 : f.y) && (f.x2 === undefined || fogged(f.x2, f.y2));
         if (f.type === 'flash') {
+          if (hid) continue;
           if (li < lights.length) { const l = lights[li++]; l.position.set(f.x, f.h + 20, f.y); l.color.set(f.color); l.intensity = 260 * f.power * k; }
           continue;
         }
@@ -137,6 +141,7 @@ export function createEffects(scene, renderer, camera) {
         if (m === undefined) { m = build(f); fxMesh.set(f, m); if (m) scene.add(m); }
         if (!m) continue;
         m.userData.seen = frame;
+        m.visible = !hid;
         const mat = m.userData.mat;
         switch (f.type) {
           case 'boom': mat.opacity = k * 0.8; m.scale.setScalar(f.r * (0.35 + 0.75 * (1 - k))); break;

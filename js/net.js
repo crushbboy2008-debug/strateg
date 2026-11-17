@@ -2,41 +2,28 @@
 // ---------- Сетевая игра ----------
 // Симуляцию считает только хост. Клиенты шлют ему приказы и ввод вселённого воина,
 // а в ответ ~12 раз в секунду получают снимок состояния и журнал эффектов.
-// Соединение — напрямую между браузерами (WebRTC через PeerJS), свой сервер не нужен.
+// Связь идёт через Playgama Bridge Multiplayer: комнаты на серверах площадки, у каждого игрока свой id, сообщения — send(type, data, { to }).
+// Площадка пропускает около 64 КБ в секунду на игрока, поэтому снимки боя шлются одним общим сообщением всем и чаще, чем позволяет бюджет, не уходят.
 const UT = Object.keys(UNITS), BT = Object.keys(BUILDINGS);
-const PEER_SRC = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js', ROOM = 'strateg-room-', SNAP_DT = 1 / 12;
-const r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100;
+const SNAP_MIN = 1 / 10, SNAP_BUDGET = 45000; // самый частый снимок — 10 раз в секунду; бюджет — байт в секунду на снимки
+const r0 = Math.round, r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100;
 const fin = v => (Number.isFinite(+v) ? +v : 0);
+const MP = () => bridge.multiplayer;
 
 function netErr(e) {
-  const t = e && e.type;
-  if (t === 'peer-unavailable') return 'Комната не найдена. Проверьте код';
-  if (t === 'browser-incompatible') return 'На этой странице прямые соединения запрещены. Сетевая игра работает, когда игра открыта на отдельном сайте';
-  if (t === 'network' || t === 'server-error' || t === 'socket-error' || t === 'socket-closed') return 'Нет связи с сервером соединений';
-  return 'Ошибка сети' + (t ? ': ' + t : '');
+  const c = String((e && (e.code || e.message)) || '');
+  if (/ROOM_NOT_FOUND/.test(c)) return T('Комната не найдена. Проверьте код');
+  if (/ROOM_FULL/.test(c)) return T('Комната заполнена');
+  if (/ROOM_CLOSED/.test(c)) return T('В комнате уже идёт бой');
+  if (/CONNECTION_FAILED|NOT_SUPPORTED/.test(c)) return T('Нет связи с сервером соединений');
+  return T('Ошибка сети');
 }
 
-// Библиотека соединений отбрасывает сообщения крупнее ~16 КБ, поэтому большие (старт с картой, снимки в разгар боя)
-// режутся на части и собираются на той стороне. Канал надёжный и упорядоченный, части приходят подряд.
-const CHUNK = 6000;
-let chunkId = 0;
-function netSend(c, m) {
-  const s = JSON.stringify(m);
-  if (s.length < CHUNK) { c.send(m); return; }
-  const id = ++chunkId, n = Math.ceil(s.length / CHUNK);
-  for (let i = 0; i < n; i++) c.send({ t: 'ch', id, i, n, d: s.slice(i * CHUNK, (i + 1) * CHUNK) });
+// «Соединение» с одним игроком комнаты: send — личное сообщение ему. У хоста такие соединения для каждого гостя, у гостя — одно, до хоста.
+function mkConn(id) {
+  return { peer: id, open: true, seen: Date.now(), send(m) { try { const p = MP().send('m', m, { to: id }); if (p && p.catch) p.catch(() => {}); } catch (e) { /* связь оборвётся — это заметит проверка связи */ } }, close() { this.open = false; } };
 }
-function netRecv(c, m, handle) {
-  if (!m || m.t !== 'ch') return handle(m);
-  if (!c.buf || c.buf.id !== m.id) c.buf = { id: m.id, parts: [] };
-  c.buf.parts[m.i] = m.d;
-  if (m.i !== m.n - 1) return;
-  const text = c.buf.parts.join('');
-  c.buf = null;
-  let o;
-  try { o = JSON.parse(text); } catch (e) { return; }
-  handle(o);
-}
+function netSend(c, m) { if (c && c.open) c.send(m); }
 
 // Приказ игрока. Выполняется на хосте (и в одиночной игре). Возвращает '' или причину отказа.
 function execCmd(p, m) {
@@ -47,7 +34,7 @@ function execCmd(p, m) {
     i.yaw = fin(m.yaw); i.aim = Math.max(0, Math.min(1, fin(m.aim))); i.lmb = !!m.l; i.rmb = !!m.r;
     return '';
   }
-  if (!p.alive) return 'Ваша цитадель пала';
+  if (!p.alive) return T('Ваша цитадель пала');
   const own = (id, kind) => { for (const e of G.ents) if (e.id === id) return !e.dead && e.owner === p.idx && e.kind === kind ? e : null; return null; };
   switch (m.c) {
     case 'build': return ['mine', 'barracks', p.fac.tower].includes(m.type) ? tryBuild(p, m.type, fin(m.x), fin(m.y)) : '';
@@ -61,8 +48,8 @@ function execCmd(p, m) {
         if (e.kind !== 'bld' || e.owner !== p.idx || e.dead || e.build < 1 || e.hp >= e.maxHp) continue;
         if (e.repair) busy++; else if (!setRepair(p, e, true)) n++;
       }
-      if (n) { note(p, 'Начата починка зданий: ' + n); return ''; }
-      return busy ? 'Здания уже чинятся' : p.gold < 5 ? 'Недостаточно золота' : 'Все здания целы';
+      if (n) { note(p, T('Начата починка зданий: ') + n); return ''; }
+      return busy ? T('Здания уже чинятся') : p.gold < 5 ? T('Недостаточно золота') : T('Все здания целы');
     }
     case 'rally': { const b = own(m.b, 'bld'); if (b && b.type === 'barracks') b.rally = { x: fin(m.x), y: fin(m.y) }; return ''; }
     case 'order': {
@@ -81,10 +68,10 @@ function execCmd(p, m) {
     }
     case 'cast': { // способность героя по приказу; x, y — цель (для метеора и ракет), дальше дальности не бьёт
       const u = p.heroU;
-      if (!u || u.dead) return 'Героя нет в строю';
+      if (!u || u.dead) return T('Героя нет в строю');
       const d = UNITS[u.type], a = d.abil;
-      if (u.stun > 0) return 'Герой оглушён';
-      if (u.acd > 0) return a.name + ': ещё ' + Math.ceil(u.acd) + ' с';
+      if (u.stun > 0) return T('Герой оглушён');
+      if (u.acd > 0) return a.name + T(': ещё ') + Math.ceil(u.acd) + T(' с');
       let tx = u.x, ty = u.y;
       if (a.range) {
         const dx = fin(m.x) - u.x, dy = fin(m.y) - u.y, l = Math.hypot(dx, dy) || 1, k = Math.min(1, (a.range + u.r) / l);
@@ -93,7 +80,7 @@ function execCmd(p, m) {
       castAbility(u, d, tx, ty);
       return '';
     }
-    case 'auto': p.autoCast = !p.autoCast; note(p, 'Герой применяет способность сам: ' + (p.autoCast ? 'да' : 'нет')); return '';
+    case 'auto': p.autoCast = !p.autoCast; note(p, T('Герой применяет способность сам: ') + (p.autoCast ? T('да') : T('нет'))); return '';
     case 'possess':
       setPossess(p, m.id ? own(m.id, 'unit') : null);
       if (p.poss && p.inp !== Input) { p.inp.yaw = fin(m.yaw); p.inp.lmb = p.inp.rmb = false; p.inp.keys = {}; }
@@ -103,55 +90,62 @@ function execCmd(p, m) {
 }
 
 const Net = {
-  peer: null, role: null, code: '', conns: [], hostConn: null, lobby: null, you: 0, playing: false, loading: null,
+  role: null, code: '', conns: [], hostConn: null, lobby: null, you: 0, playing: false, bound: false, hostId: null, snapDt: SNAP_MIN,
   acc: 0, inT: 0, byId: new Map(), pById: new Map(), props: new Map(),
   on: { lobby() {}, start() {}, end() {}, closed() {}, msg() {}, error() {} }, // обработчики задаёт интерфейс
 
-  load() {
-    if (window.Peer) return Promise.resolve();
-    return this.loading || (this.loading = new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = PEER_SRC; s.onload = () => res();
-      s.onerror = () => { this.loading = null; rej(new Error('Не удалось загрузить сетевой модуль. Нужен интернет')); };
-      document.head.appendChild(s);
-    }));
+  // Подписки на события комнаты (один раз за сессию); обработчики сами проверяют, в какой мы роли
+  bind() {
+    if (this.bound) return;
+    this.bound = true;
+    const mp = MP(), E = bridge.EVENT_NAME;
+    mp.on(E.MULTIPLAYER_PLAYER_JOINED, p => this.onJoined(p));
+    mp.on(E.MULTIPLAYER_PLAYER_LEFT, p => this.onLeft(p));
+    mp.on(E.MULTIPLAYER_MESSAGE_RECEIVED, m => this.onMsg(m));
+    mp.on(E.MULTIPLAYER_ROOM_LEFT, why => this.onRoomLeft(why));
+    mp.on(E.MULTIPLAYER_HOST_CHANGED, h => this.onHostChanged(h));
   },
+  onJoined(p) { if (this.role === 'host' && p && p.id !== MP().playerId && !this.conns.some(c => c.peer === p.id)) this.accept(mkConn(p.id)); },
+  onLeft(p) {
+    if (!p) return;
+    if (this.role === 'host') { const c = this.conns.find(q => q.peer === p.id); if (c) this.drop(c, T('соединение закрыто')); }
+    else if (this.role === 'client' && p.id === this.hostId) this.lost();
+  },
+  onMsg(m) {
+    if (!m || m.type !== 'm' || !m.data) return;
+    if (this.role === 'host') { const c = this.conns.find(q => q.peer === m.from); if (c) this.hostMsg(c, m.data); }
+    else if (this.role === 'client' && m.from === (this.hostId || MP().hostId)) this.clientMsg(m.data); // хост мог прислать комнату раньше, чем join() запомнил его id
+  },
+  onRoomLeft() { if (this.role === 'client') this.lost(); else if (this.role === 'host') { this.leave(); this.on.closed(netErr({ code: 'CONNECTION_FAILED' })); } }, // сработает, только если нас выбросило само: наш выход сначала обнуляет роль
+  onHostChanged(h) { // у нас хост — тот, кто создал комнату; если площадка передала роль другому, партия потеряна (расчёт боя живёт только на машине хоста)
+    if (this.role === 'client' && h && h.id !== this.hostId) this.lost();
+  },
+  lost() { this.leave(); this.on.closed(T('Соединение с хостом потеряно')); },
 
   leave() {
-    const p = this.peer;
-    this.peer = null; this.role = null; this.conns = []; this.hostConn = null; this.lobby = null; this.playing = false; this.code = '';
-    if (p) { try { p.destroy(); } catch (e) { /* уже закрыт */ } }
+    const was = this.role;
+    this.role = null; this.conns = []; this.hostConn = null; this.lobby = null; this.playing = false; this.code = ''; this.hostId = null;
+    if (was) { try { const p = MP().leaveRoom(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* уже вне комнаты */ } }
   },
 
   // ---- хост ----
   async host(faction) {
-    await this.load();
-    this.leave();
-    const ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const code = Array.from({ length: 5 }, () => ABC[Math.floor(Math.random() * ABC.length)]).join('');
-    const peer = this.peer = new Peer(ROOM + code);
-    this.role = 'host'; this.code = code;
+    this.leave(); this.bind();
+    this.role = 'host';
     this.lobby = { slots: [{ id: 'host', faction }], map: 'island', diff: 'normal', bots: 1, coop: false };
-    return new Promise((res, rej) => {
-      let open = false;
-      peer.on('open', () => { open = true; res(code); });
-      peer.on('error', e => { if (!open) { if (this.peer === peer) this.leave(); rej(new Error(netErr(e))); } else if (e.type !== 'peer-unavailable') this.on.error(netErr(e)); });
-      peer.on('disconnected', () => { if (this.peer === peer && !peer.destroyed) { try { peer.reconnect(); } catch (e) { /* повторим при следующем обрыве */ } } });
-      peer.on('connection', c => this.accept(c));
-    });
+    try { this.code = await MP().createRoom({ maxPlayers: 4, isVisible: false }); }
+    catch (e) { this.role = null; this.lobby = null; throw new Error(netErr(e)); }
+    this.hostId = MP().playerId;
+    return this.code;
   },
   accept(c) {
-    c.on('open', () => {
-      if (this.playing || this.lobby.slots.length >= 4) { netSend(c, { t: 'closed', text: this.playing ? 'В комнате уже идёт бой' : 'Комната заполнена' }); setTimeout(() => c.close(), 500); return; }
-      const free = Object.keys(FACTIONS).find(f => !this.lobby.slots.some(s => s.faction === f));
-      this.lobby.slots.push({ id: c.peer, faction: free });
-      c.seen = Date.now();
-      this.conns.push(c);
-      this.pushLobby();
-    });
-    c.on('data', m => netRecv(c, m, o => this.hostMsg(c, o)));
-    c.on('close', () => this.drop(c, 'соединение закрыто'));
-    c.on('error', () => {}); // сбой отдельного сообщения — не повод выгонять игрока; обрыв поймает проверка связи
+    if (this.playing || this.lobby.slots.length >= 4) { netSend(c, { t: 'closed', text: this.playing ? T('В комнате уже идёт бой') : T('Комната заполнена') }); return; }
+    const free = Object.keys(FACTIONS).find(f => !this.lobby.slots.some(s => s.faction === f));
+    this.lobby.slots.push({ id: c.peer, faction: free });
+    c.seen = Date.now();
+    this.conns.push(c);
+    if (this.lobby.slots.length >= 4) { try { MP().setRoomOpen(false); } catch (e) { /* не страшно: лишних отправим в accept */ } }
+    this.pushLobby();
   },
   drop(c, why) {
     const i = this.conns.indexOf(c);
@@ -160,7 +154,7 @@ const Net = {
     this.lobby.slots = this.lobby.slots.filter(s => s.id !== c.peer);
     if (this.playing) for (const p of G.players) if (p.conn === c) { // за ушедшего доигрывает бот
       p.conn = null; setPossess(p, null); p.bot = true;
-      if (p.alive) G.notes.push(p.fac.name + ': игрок отключился (' + (why || 'вышел') + '), за него играет бот');
+      if (p.alive) G.notes.push(p.fac.name + T(': игрок отключился (') + (why || T('вышел')) + T('), за него играет бот'));
     }
     this.pushLobby();
   },
@@ -180,7 +174,7 @@ const Net = {
   hostMsg(c, m) {
     if (!m || typeof m !== 'object') return;
     c.seen = Date.now();
-    if (m.t === 'bye') { this.drop(c, 'закрыл игру'); try { c.close(); } catch (e) { /* уже закрыто */ } return; }
+    if (m.t === 'bye') { this.drop(c, T('закрыл игру')); try { c.close(); } catch (e) { /* уже закрыто */ } return; }
     if (m.t === 'fac') {
       const s = this.lobby.slots.find(q => q.id === c.peer);
       if (s && !this.playing && FACTIONS[m.faction] && !this.lobby.slots.some(q => q !== s && q.faction === m.faction)) { s.faction = m.faction; this.pushLobby(); }
@@ -201,71 +195,64 @@ const Net = {
   // Вызывается после newGame: раздаёт клиентам стартовое состояние
   begin(cfg) {
     this.playing = true; this.acc = 0;
-    const props = G.props.map(q => ({ id: q.id, type: q.type, fac: q.fac, owner: q.owner, x: r1(q.x), y: r1(q.y), r: q.r, face: r2(q.face) }));
-    const snap = this.snap();
+    try { MP().setRoomOpen(false); } catch (e) { /* бой идёт — новых игроков не берём */ }
+    const props = G.props.map(q => ({ id: q.id, type: q.type, fac: q.fac, owner: q.owner, x: r0(q.x), y: r0(q.y), r: q.r, face: r2(q.face) }));
+    const snap = this.snap(), yous = {};
     this.lobby.slots.forEach((s, i) => {
       if (!i) return;
       const c = this.conns.find(q => q.peer === s.id), p = G.players[i];
       if (!c || !c.open) { p.bot = true; return; }
-      p.conn = c;
-      netSend(c, { t: 'start', you: i, cfg: { map: cfg.map, diff: cfg.diff, coop: cfg.coop, players: cfg.players }, seed: G.seed, obstacles: G.obstacles.map(o => ({ x: r1(o.x), y: r1(o.y), r: r1(o.r), tree: o.tree, seed: r2(o.seed), kind: o.kind })), props, snap });
+      p.conn = c; yous[s.id] = i;
     });
+    // Старт — одно сообщение всем (а не по одному на гостя): так оно съедает бюджет площадки один раз. Свой номер игрок берёт из yous по своему id.
+    if (Object.keys(yous).length) MP().send('m', { t: 'start', yous, cfg: { map: cfg.map, diff: cfg.diff, coop: cfg.coop, players: cfg.players }, seed: G.seed, obstacles: G.obstacles.map(o => ({ x: r0(o.x), y: r0(o.y), r: r0(o.r), tree: o.tree, seed: r2(o.seed), kind: o.kind })), props, snap }, { to: 'others' });
   },
   finish() { // хост вышел в меню: бой окончен для всех
     if (this.role !== 'host' || !this.playing) return;
     this.playing = false;
     for (const c of this.conns) if (c.open) netSend(c, { t: 'end' });
+    try { if (this.lobby.slots.length < 4) MP().setRoomOpen(true); } catch (e) { /* комната могла закрыться */ }
     this.pushLobby();
   },
   snap() {
     const u = [], b = [], p = [];
     for (const e of G.ents) {
       if (e.dead) continue;
-      if (e.kind === 'unit') u.push([e.id, UT.indexOf(e.type), e.owner, r1(e.x), r1(e.y), Math.ceil(e.hp), e.maxHp, r2(e.face), (e.moving ? 1 : 0) | (e.flash > 0 ? 2 : 0) | (e.stun > 0 ? 4 : 0),
+      // координаты — целые числа: между снимками гость сглаживает движение, а каждый знак в снимке считается в бюджете площадки
+      if (e.kind === 'unit') u.push([e.id, UT.indexOf(e.type), e.owner, r0(e.x), r0(e.y), Math.ceil(e.hp), r0(e.maxHp), r2(e.face), (e.moving ? 1 : 0) | (e.flash > 0 ? 2 : 0) | (e.stun > 0 ? 4 : 0),
         e.swing > 0 ? r2(e.swing) : 0, e.acd > 0 ? r1(e.acd) : 0, e.cd > 0 ? r2(e.cd) : 0]);
-      else b.push([e.id, BT.indexOf(e.type), e.owner, r1(e.x), r1(e.y), Math.ceil(e.hp), r2(e.build), e.queue.map(t => UT.indexOf(t)), r2(e.trainT), r2(e.aim), e.fire > 0 ? r2(e.fire) : 0,
-        (e.repair ? 1 : 0) | (e.flash > 0 ? 2 : 0), r1(e.hitT), r1(e.rally.x), r1(e.rally.y)]);
+      else b.push([e.id, BT.indexOf(e.type), e.owner, r0(e.x), r0(e.y), Math.ceil(e.hp), r2(e.build), e.queue.map(t => UT.indexOf(t)), r2(e.trainT), r2(e.aim), e.fire > 0 ? r2(e.fire) : 0,
+        (e.repair ? 1 : 0) | (e.flash > 0 ? 2 : 0), r1(e.hitT), r0(e.rally.x), r0(e.rally.y)]);
     }
-    for (const q of G.projs) p.push([q.id || (q.id = G.nextId++), q.kind, r1(q.x), r1(q.y), r1(q.h), r2(q.ang || 0), q.lob ? 1 : 0]);
+    for (const q of G.projs) p.push([q.id || (q.id = G.nextId++), q.kind, r0(q.x), r0(q.y), r0(q.h), r2(q.ang || 0), q.lob ? 1 : 0]);
     const pl = G.players.map(q => [Math.floor(q.gold), r1(q.income), q.alive ? 1 : 0, q.up.atk, q.up.arm, q.up.eco, q.research ? [q.research.key, r1(q.research.t), q.research.time] : 0,
       q.heroLvl, Math.floor(q.heroXp), q.heroDeaths, q.heroU && !q.heroU.dead ? q.heroU.id : 0, q.alarm ? [Math.round(q.alarm.x), Math.round(q.alarm.y), r1(q.alarm.t)] : 0, q.lost, q.bl, q.bot ? 1 : 0, q.autoCast ? 1 : 0, r1(q.heroBack), q.up.fort || 0]);
-    const ev = G.evq.splice(0).map(e => e.map(v => (typeof v === 'number' ? r1(v) : v)));
+    // Журнал эффектов (искры, взрывы, звуки) только украшает бой, а места в снимке съедает много: берём первые 50, остальное пропускаем
+    const ev = G.evq.splice(0).slice(0, 50).map(e => e.map(v => (typeof v === 'number' ? r0(v * 10) / 10 : v)));
     return { t: 's', T: r2(G.time), u, b, p, pl, ev, dp: G.props.filter(q => q.dead).map(q => q.id), w: G.winTeam === undefined ? null : G.winTeam };
   },
   hostTick(dt) {
     this.acc += dt;
-    if (this.acc < SNAP_DT) return;
+    if (this.acc < this.snapDt) return;
     this.acc = 0;
     const s = this.snap();
-    for (const p of G.players) {
-      const c = p.conn;
-      if (!c || !c.open) continue;
-      if (p.nq.length) netSend(c, { t: 'n', n: p.nq.splice(0) });
-      // Медленная связь: если прошлые снимки ещё не ушли, этот пропускаем — следующий всё равно несёт полное состояние
-      const dc = c.dataChannel;
-      if (dc && dc.bufferedAmount > 120000) continue;
-      netSend(c, s);
-    }
+    for (const p of G.players) if (p.conn && p.conn.open && p.nq.length) netSend(p.conn, { t: 'n', n: p.nq.splice(0) }); // личные сообщения игроку
+    if (!G.players.some(p => p.conn && p.conn.open)) return;
+    // Снимок одинаков для всех — уходит одним сообщением. Интервал растёт вместе с размером снимка, чтобы не выйти за бюджет площадки (~64 КБ/с).
+    try { const pr = MP().send('m', s, { to: 'others' }); if (pr && pr.catch) pr.catch(() => {}); } catch (e) { /* связь оборвалась — заметит проверка связи */ }
+    this.snapDt = Math.max(SNAP_MIN, JSON.stringify(s).length / SNAP_BUDGET);
   },
 
   // ---- клиент ----
   async join(code) {
-    await this.load();
-    this.leave();
-    const peer = this.peer = new Peer();
+    this.leave(); this.bind();
     this.role = 'client'; this.code = code;
-    return new Promise((res, rej) => {
-      let done = false;
-      const fail = text => { if (done) return; done = true; if (this.peer === peer) this.leave(); rej(new Error(text)); };
-      peer.on('open', () => {
-        const c = this.hostConn = peer.connect(ROOM + code, { reliable: true, serialization: 'json' });
-        c.on('open', () => { this.seen = Date.now(); if (!done) { done = true; res(); } });
-        c.on('data', m => netRecv(c, m, o => this.clientMsg(o)));
-        c.on('close', () => { if (this.peer === peer) { this.leave(); this.on.closed('Соединение с хостом потеряно'); } });
-      });
-      peer.on('error', e => fail(netErr(e)));
-      setTimeout(() => fail('Не удалось подключиться. Проверьте код комнаты'), 15000);
-    });
+    try { await MP().joinRoom(code); }
+    catch (e) { this.role = null; this.code = ''; throw new Error(netErr(e)); }
+    if (this.role !== 'client') return; // за время подключения игрок уже вышел
+    this.hostId = MP().hostId; this.hostConn = mkConn(this.hostId); this.seen = Date.now();
+    // Хост замечает нового игрока и присылает состояние комнаты; если не прислал, значит это чужая комната или хост завис
+    setTimeout(() => { if (this.role === 'client' && !this.lobby) { this.leave(); this.on.closed(T('Не удалось подключиться. Проверьте код комнаты')); } }, 15000);
   },
   send(m) { const c = this.hostConn; if (c && c.open) netSend(c, m); },
   clientMsg(m) {
@@ -273,7 +260,7 @@ const Net = {
     this.seen = Date.now();
     switch (m.t) {
       case 'lobby': this.lobby = m.lobby; this.you = m.you; this.playing = !!m.playing; this.on.lobby(); break;
-      case 'start': this.playing = true; this.on.start(m); break;
+      case 'start': if (!m.yous || m.yous[MP().playerId] === undefined) break; m.you = m.yous[MP().playerId]; this.playing = true; this.on.start(m); break;
       case 's': if (G.net === 'client' && G.running) this.applySnap(m); break;
       case 'n': if (G.net === 'client') for (const t of m.n) G.notes.push(t); break;
       case 'msg': this.on.msg(m.text); break;
@@ -387,13 +374,13 @@ setInterval(() => {
   if (Net.role === 'client' && Net.hostConn && Net.hostConn.open) {
     Net.send({ t: 'ping' });
     if (stalled) Net.seen = now;
-    else if (now - Net.seen > NET_TIMEOUT) { Net.leave(); Net.on.closed('Соединение с хостом потеряно'); }
+    else if (now - Net.seen > NET_TIMEOUT) { Net.leave(); Net.on.closed(T('Соединение с хостом потеряно')); }
   } else if (Net.role === 'host') {
     for (const c of Net.conns.slice()) {
       if (stalled) c.seen = now;
-      else if (now - c.seen > NET_TIMEOUT) { Net.drop(c, 'нет связи'); try { c.close(); } catch (e) { /* уже закрыто */ } }
+      else if (now - c.seen > NET_TIMEOUT) { Net.drop(c, T('нет связи')); try { c.close(); } catch (e) { /* уже закрыто */ } }
       else if (c.open) netSend(c, { t: 'ping' });
     }
   }
 }, 2000);// Закрывая вкладку, клиент прощается, чтобы хост сразу посадил на его место бота
-window.addEventListener('pagehide', () => { if (Net.role === 'client') Net.send({ t: 'bye' }); });
+window.addEventListener('pagehide', () => { if (Net.role === 'client') Net.send({ t: 'bye' }); if (Net.role) Net.leave(); });

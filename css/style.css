@@ -187,8 +187,8 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 2
 .keys { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 26px; width: 100%; margin-top: 8px; padding-top: 12px; border-top: 1px solid #5d6873; }
 .keys h4 { font: 700 11px var(--ui); text-transform: uppercase; letter-spacing: .12em; color: var(--gold); margin-bottom: 5px; }
 .keys p { font-size: 11.5px; color: #dddcd6; line-height: 1.75; }
-#endStats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; }
-#endStats div { background: linear-gradient(#383f47, #1b1e22); border: 1px solid var(--key-line); border-bottom-color: var(--key-lo); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16); padding: 10px 6px; text-align: center; }
+#endStats { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; width: 100%; }
+#endStats div { flex: 0 0 calc(25% - 6px); min-width: 0; background: linear-gradient(#383f47, #1b1e22); border: 1px solid var(--key-line); border-bottom-color: var(--key-lo); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16); padding: 10px 6px; text-align: center; }
 #endStats b { display: block; font: 700 24px var(--title); color: var(--gold-hi); }
 #endStats span { font-size: 11px; color: var(--dim); }
 #end.win h1 { color: var(--gold-hi); }
@@ -207,12 +207,16 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 2
 .up { position: relative; flex: 1; min-height: 0; line-height: 1; display: flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--key-line); border-bottom: 2px solid var(--key-lo); background: linear-gradient(#4a525b, #23272c); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2);
   overflow: hidden; font-size: 9.5px; font-weight: 600; text-align: left; white-space: nowrap; text-shadow: 0 1px 0 rgba(0, 0, 0, .7); }
 .up:hover { border-color: var(--gold-hi); background: linear-gradient(#5b646f, #2c3138); }
-.up .ui { width: 14px; text-align: center; font-size: 11px; }
-.up .un { flex: 1; }
+.up .ui { width: 14px; height: 14px; flex: none; color: #e4e8ec; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, .6)); }
+.up .ui svg { display: block; width: 100%; height: 100%; }
+.up:hover .ui { color: #fff; }
+/* метка союзника в списке противников — ромб вместо значка-картинки */
+.foe .ally { display: inline-block; width: 7px; height: 7px; margin-right: 6px; vertical-align: 1px; background: var(--brass); transform: rotate(45deg); box-shadow: 0 0 0 1px #050506; }
+.up .un { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .up .pips { display: flex; gap: 2px; }
 .up .pips i { width: 5px; height: 5px; background: #14171a; box-shadow: 0 0 0 1px #6b7580; transform: rotate(45deg); margin: 0 1px; }
 .up .pips i.on { background: var(--gold); }
-.up .cs { display: flex; gap: 3px; align-items: center; min-width: 34px; justify-content: flex-end; font-weight: 700; color: #ffd866; }
+.up .cs { display: flex; flex: none; gap: 3px; align-items: center; min-width: 30px; justify-content: flex-end; font-weight: 700; color: #ffd866; }
 .up .cs .ico { width: 9px; height: 9px; }
 .up .cs em { font-style: normal; }
 .up .prog { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; }
@@ -224,7 +228,7 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 2
 .up.busy .un, .up.busy .ui { opacity: 1; }
 .lv { color: #ffd866; font-weight: 700; margin-left: 4px; }
 @media (max-width: 1340px) { #selBox { display: none; } }
-@media (max-width: 1080px) { .ups { width: 104px; } .up .pips { display: none; } }@media (max-width: 1080px) { #panel { flex-wrap: wrap; align-content: flex-end; } }
+@media (max-width: 1080px) { .ups { width: 114px; } .up { padding: 0 4px; gap: 3px; } .up .pips { display: none; } }@media (max-width: 1080px) { #panel { flex-wrap: wrap; align-content: flex-end; } }
 
 /* ---------- Главное меню ----------
    Экран подготовки к бою: слева выбор фракции, справа поле боя и условия, посередине видна база выбранной фракции. */
@@ -241,7 +245,20 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 2
 #menu .brand h1 { font: 600 30px var(--title); text-transform: uppercase; letter-spacing: .16em; color: var(--gold-hi); text-shadow: 0 2px 0 #000, 0 0 18px rgba(0, 0, 0, .8); padding: 0; }
 #menu .brand h1::before { content: ''; display: inline-block; width: 11px; height: 11px; margin-right: .55em; vertical-align: .22em; background: var(--gold); transform: rotate(45deg); box-shadow: 0 0 0 3px #17171b, 0 0 0 4px var(--gold-d); }
 .brand p { margin-top: 3px; font-size: 12px; letter-spacing: .05em; color: #b4b2aa; text-shadow: 0 1px 2px #000; }
+.mTopR { display: flex; align-items: flex-end; gap: 14px; }
 .tabs { display: flex; gap: 4px; }
+
+/* ---------- Настройки: громкость ---------- */
+#settings { z-index: 50; }
+.vols { display: flex; flex-direction: column; gap: 16px; width: 100%; padding: 6px 4px 8px; }
+.vrow { display: grid; grid-template-columns: 170px 1fr 52px; align-items: center; gap: 4px 14px; font: 500 14px var(--title); letter-spacing: .06em; color: #dfe2e6; text-shadow: 0 1px 2px #000; }
+.vrow b { text-align: right; color: var(--gold-hi); font-weight: 700; }
+.vrow small { grid-column: 2 / 4; font: 400 12px var(--ui); letter-spacing: 0; color: #9aa0a8; }
+input.vs { -webkit-appearance: none; appearance: none; width: 100%; height: 10px; cursor: pointer; outline: none; border: 1px solid #050506; border-radius: 2px;
+  background: linear-gradient(90deg, var(--gold) var(--p, 60%), #23272d var(--p, 60%)); box-shadow: inset 0 1px 2px rgba(0, 0, 0, .7), 0 0 0 1px var(--brass); }
+input.vs::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 24px; border-radius: 2px; border: 1px solid #050506; background: linear-gradient(var(--key-ha), var(--key-b)); box-shadow: 0 0 0 1px var(--key-line), 0 2px 4px rgba(0, 0, 0, .6); }
+input.vs::-moz-range-thumb { width: 14px; height: 22px; border-radius: 2px; border: 1px solid #050506; background: linear-gradient(var(--key-ha), var(--key-b)); box-shadow: 0 0 0 1px var(--key-line); }
+input.vs:hover::-webkit-slider-thumb { box-shadow: 0 0 0 1px var(--gold-hi), 0 2px 4px rgba(0, 0, 0, .6); }
 .tabs button { padding: 8px 16px 7px; background: none; border: 0; border-bottom: 2px solid transparent; font: 500 12.5px var(--title); text-transform: uppercase; letter-spacing: .08em; color: #c3c8ce; text-shadow: 0 1px 2px #000; }
 .tabs button:hover { color: var(--text); }
 .tabs button.sel { color: var(--gold-hi); border-bottom-color: var(--gold); }
@@ -286,7 +303,7 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 2
 .roster figure { flex: 1 1 0; max-width: 78px; min-width: 0; padding: 2px 2px 4px; border: 2px solid #09090b; background: var(--grain), linear-gradient(rgba(46, 45, 43, .95), rgba(18, 18, 22, .95));
   box-shadow: 0 0 0 1px #55555e, inset 0 0 0 1px rgba(170, 182, 194, .16), 0 4px 10px rgba(0, 0, 0, .5); }
 .roster img { display: block; width: 100%; aspect-ratio: 1; }
-.roster figcaption { font-size: 10.5px; line-height: 1.2; color: #cfcfd5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.roster figcaption { font-size: clamp(8.5px, .92vw, 10.5px); line-height: 1.2; color: #cfcfd5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .roster figcaption i { display: block; font-style: normal; font-size: 9.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); }
 .roster figure { cursor: default; transition: transform .1s; }
 .roster figure:hover, .roster figure.on { transform: translateY(-3px); }
@@ -332,7 +349,7 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 2
 .mLeft > *, .mRight > *, #facInfo { animation: paneIn .38s ease-out backwards; }
 .mRight > * { animation-delay: .07s; } #facInfo { animation-delay: .14s; }
 @media (prefers-reduced-motion: reduce) { .mLeft > *, .mRight > *, #facInfo { animation: none; } }
-@media (max-width: 900px) { /* узкое окно: всё в один столбец с прокруткой */
+@media (max-width: 900px) and (min-height: 521px), (max-width: 720px) { /* узкое окно: всё в один столбец с прокруткой */
   #menu { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; overflow-y: auto; background: rgba(9, 9, 12, .8); }
   .mCol { overflow: visible; flex: none; } #facInfo { order: 2; } .mRight { order: 3; } .mFoot { order: 4; } .mTop { flex-wrap: wrap; }
 }
@@ -358,3 +375,189 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 2
 .ro { pointer-events: none; opacity: .7; }
 #startBtn:disabled { filter: grayscale(1); opacity: .6; cursor: default; }
 .netRow button:disabled { opacity: .5; cursor: default; }
+
+/* ---------- Кампания и обучение ---------- */
+#campList { display: flex; flex-direction: column; gap: 5px; max-height: calc(100vh - 215px); overflow-y: auto; padding-right: 3px; scrollbar-width: thin; scrollbar-color: #5d6873 transparent; } /* 8 миссий в невысоком окне: список прокручивается, а не обрезается */
+.ms { position: relative; display: flex; align-items: center; gap: 10px; padding: 6px 10px 6px 6px; border: 1px solid var(--key-line); border-left: 4px solid var(--brass); border-bottom-color: var(--key-lo);
+  background: linear-gradient(var(--key-a), var(--key-b)); cursor: pointer; transition: transform .1s, border-color .1s; }
+.ms:hover { border-color: var(--gold-hi); border-left-color: var(--brass); background: linear-gradient(var(--key-ha), var(--key-hb)); transform: translateX(3px); }
+.ms.sel { border-color: var(--gold); border-left-color: var(--gold); background: linear-gradient(90deg, var(--sel-a), var(--sel-b) 90%); }
+.ms.lock { opacity: .45; cursor: not-allowed; transform: none; }
+.ms .n { flex: none; width: 26px; height: 26px; display: grid; place-items: center; font: 700 14px var(--title); color: var(--gold-hi); background: rgba(0, 0, 0, .35); border: 1px solid var(--key-line); }
+.ms .mt { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ms .mt b { font: 600 14px var(--title); letter-spacing: .04em; color: #e6e3d9; }
+.ms .mt small { font-size: 10.5px; line-height: 1.25; color: #c3c8ce; }
+.ms .stars, .endStars b { font-size: 13px; letter-spacing: 1px; color: #ffd24a; white-space: nowrap; }
+.ms .stars em, .endStars b em { font-style: normal; color: #4d535b; }
+.endStars b { font-size: 28px; }
+#facInfo .brief { max-width: 500px; margin: 10px auto 0; padding: 10px 14px; text-align: left; background: rgba(8, 8, 11, .55); border-left: 3px solid var(--gold); }
+#facInfo .brief b { font: 600 16px var(--title); letter-spacing: .06em; color: var(--gold-hi); }
+#facInfo .brief p { margin: 6px 0 0; max-width: none; }
+#facInfo .brief .goal { color: #fff; font-weight: 700; }
+.starRules { list-style: none; margin: 8px 0 0; padding: 0; font-size: 11.5px; color: #b9bdc3; }
+.starRules li { display: flex; gap: 7px; align-items: center; padding: 1px 0; }
+.starRules i { font-style: normal; color: #4d535b; }
+.starRules li.on i { color: #ffd24a; }
+/* табличка с шагом обучения / целью миссии над полем боя */
+#tut { position: absolute; top: 46px; left: 50%; transform: translateX(-50%); width: min(540px, calc(100vw - 360px)); min-width: 300px; padding: 9px 14px 11px; pointer-events: auto;
+  background: var(--grain), linear-gradient(rgba(30, 33, 38, .94), rgba(14, 16, 19, .94)); border: 1px solid var(--key-line); border-left: 4px solid var(--gold); box-shadow: 0 6px 22px rgba(0, 0, 0, .55); }
+#tut .tk { font: 600 11px var(--title); text-transform: uppercase; letter-spacing: .12em; color: var(--brass); }
+#tut .tx { margin-top: 4px; font-size: 13px; line-height: 1.45; color: #f1f0ea; text-shadow: 0 1px 2px #000; }
+#tut .tx kbd { padding: 0 5px; border: 1px solid var(--key-line); background: rgba(255, 255, 255, .1); font: 700 11px var(--ui); }
+#tut .tb { height: 3px; margin-top: 8px; background: #23272d; }
+#tut .tb i { display: block; height: 100%; width: 0; background: var(--gold); transition: width .3s; }
+#tut #tutSkip { position: absolute; right: 8px; top: 6px; padding: 2px 8px; font-size: 10.5px; }
+.tutHi { outline: 2px solid var(--gold-hi); outline-offset: 1px; animation: tutPulse 1s ease-in-out infinite; z-index: 5; }
+@keyframes tutPulse { 50% { box-shadow: 0 0 0 5px rgba(224, 86, 74, .6); } }
+@media (max-width: 1000px) { #tut { top: 92px; width: calc(100vw - 20px); } }
+
+.menuBtns.row .big.small { padding: 11px 24px; }
+
+/* ---------- Обучение: картинки вместо текста ---------- */
+#tut .tr { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+#tut .ti { display: flex; align-items: center; gap: 8px; flex: none; }
+#tut .ti:empty { display: none; }
+#tut .tx { margin-top: 0; font: 600 16px var(--title); letter-spacing: .03em; }
+.kc { display: inline-grid; place-items: center; min-width: 32px; height: 32px; padding: 0 7px; font: 700 17px var(--title); color: #fff; background: linear-gradient(#4a525b, #262b31); border: 1px solid var(--key-line); border-bottom: 3px solid #0b0d10; border-radius: 4px; box-shadow: 0 0 0 1px #050506; animation: kcPulse 1.1s ease-in-out infinite; }
+@keyframes kcPulse { 50% { border-color: var(--gold-hi); box-shadow: 0 0 0 1px #050506, 0 0 10px rgba(255, 214, 90, .55); } }
+.kw { display: grid; grid-template-columns: repeat(3, 32px); gap: 2px; }
+.kw .kc { min-width: 0; padding: 0; height: 28px; font-size: 14px; }
+.kw .kc:nth-child(1) { grid-column: 2; grid-row: 1; }
+.kw .kc:nth-child(2) { grid-column: 1; grid-row: 2; }
+.kw .kc:nth-child(3) { grid-column: 2; grid-row: 2; }
+.kw .kc:nth-child(4) { grid-column: 3; grid-row: 2; }
+.ico-m { width: 24px; height: 32px; }
+.ico-b { width: 44px; height: 32px; }
+.ico-m .hl, .ico-b .hl { fill: #ffd866; stroke: #ffd866; animation: hlPulse 1s ease-in-out infinite; }
+.ico-b path.hl { fill: none; stroke-width: 2; }
+@keyframes hlPulse { 50% { opacity: .35; } }
+.ico-b .dash { stroke-dasharray: 5 4; animation: dashRun .8s linear infinite; }
+@keyframes dashRun { to { stroke-dashoffset: -9; } }
+#tut .sep { font: 700 22px var(--title); font-style: normal; color: var(--brass); }
+#tut .ico.wait { width: 26px; height: 26px; border-width: 3px; animation: spin 1.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* стрелка над подсвеченной кнопкой */
+#tutPt { position: absolute; width: 28px; height: 34px; z-index: 30; pointer-events: none; animation: ptBob .7s ease-in-out infinite; }
+#tutPt svg { display: block; width: 100%; height: 100%; fill: #ffd866; stroke: #000; stroke-width: 2.2; stroke-linejoin: round; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .6)); }
+@keyframes ptBob { 50% { transform: translateY(7px); } }
+
+/* Невысокие окна (встроенный плеер площадки): пауза со справкой и концовка должны помещаться без прокрутки */
+@media (max-height: 700px) {
+  #pauseMenu .box.narrow { gap: 7px; padding: 6px 16px 10px; max-width: 700px; }
+  #pauseMenu h2 { font-size: 22px; }
+  #pauseMenu .keys { margin-top: 0; padding-top: 6px; gap: 0 22px; }
+  #pauseMenu .keys p { line-height: 1.38; font-size: 11px; }
+  #pauseMenu .keys h4 { margin-bottom: 2px; }
+}
+
+/* ---------- Телефон (сенсорный режим) и низкие экраны ---------- */
+html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+#cv, #hud { touch-action: none; }
+.screen { touch-action: pan-y; }
+button { touch-action: manipulation; }
+#rotate { display: none; }
+
+/* кнопки поля боя справа: отмена, подтверждение, вся армия, к базе, способность героя, вселение, починка */
+#tbtns { position: absolute; right: calc(8px + env(safe-area-inset-right)); bottom: 116px; display: flex; flex-direction: column-reverse; flex-wrap: wrap-reverse; align-content: flex-start; gap: 6px;
+  max-height: calc(100% - 140px); pointer-events: none; }
+#tbtns > * { pointer-events: auto; }
+.tkb { width: 56px; height: 50px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 2px 1px; border: 1px solid var(--key-line); border-bottom: 2px solid var(--key-lo);
+  background: linear-gradient(#4a525b, #23272c); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), 0 3px 8px rgba(0, 0, 0, .5); text-shadow: 0 1px 0 rgba(0, 0, 0, .7); }
+.tkb svg, .pb svg { width: 22px; height: 22px; flex: none; fill: none; stroke: #eef1f3; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tkb span { max-width: 100%; font-size: 8.5px; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tOk { background: linear-gradient(var(--plate-a), var(--plate-b)); border-color: var(--sel-line); }
+.tkb:active, .pb.on { background: linear-gradient(var(--sel-a), var(--sel-b)); }
+
+/* вселение: джойстик слева, удар и способность справа, выход и смена воина сверху справа */
+#tpad { position: absolute; inset: 0; pointer-events: none; }
+#tpad > * { pointer-events: auto; }
+#joy { position: absolute; left: calc(26px + env(safe-area-inset-left)); bottom: 24px; width: 124px; height: 124px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .38); background: rgba(18, 20, 24, .38); touch-action: none; }
+#joyK { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .65); background: radial-gradient(circle at 40% 35%, rgba(255, 255, 255, .55), rgba(150, 160, 172, .35)); pointer-events: none; }
+.pb { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .6); color: #fff; background: rgba(160, 42, 36, .66);
+  text-shadow: 0 1px 2px #000; touch-action: none; }
+.pb span { font-size: 9px; line-height: 1; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pAtk { right: calc(26px + env(safe-area-inset-right)); bottom: 24px; width: 88px; height: 88px; }
+#pSkill { right: calc(126px + env(safe-area-inset-right)); bottom: 34px; width: 66px; height: 66px; background: rgba(36, 70, 128, .68); }
+.pb.small { right: calc(10px + env(safe-area-inset-right)); width: 52px; height: 46px; border-radius: 6px; background: rgba(30, 34, 40, .78); border-color: var(--key-line); }
+.pb.small svg { width: 18px; height: 18px; }
+#pExit { top: 48px; } #pNext { top: 100px; }
+.touch .hk, .touch #pHint, .touch #selBox, .touch .keys, .touch .mFoot, .touch #alert span, .touch #helpBtn { display: none !important; }
+.touch .tkeys { display: block; }
+.tkeys { display: none; width: 100%; margin-top: 8px; padding-top: 10px; border-top: 1px solid #5d6873; }
+.tkeys h4 { font: 700 11px var(--ui); text-transform: uppercase; letter-spacing: .12em; color: var(--gold); margin-bottom: 5px; }
+.tkeys p { font-size: 12px; color: #dddcd6; line-height: 1.6; }
+.touch #possessHud { top: 38px; bottom: auto; width: 330px; padding: 0 4px; }
+.touch #pImg { width: 44px; height: 44px; }
+.touch #pName { font-size: 14px; }
+.touch #tut { width: min(540px, calc(100vw - 250px)); }
+.fgc, .ico-b .fg, .ico-m .fg { fill: rgba(255, 216, 102, .35); stroke: #ffd866; stroke-width: 1.6; }
+.ico-b .ring { fill: none; stroke: #ffd866; stroke-width: 1.6; animation: hlPulse 1s ease-in-out infinite; }
+
+/* низкий экран (меньше 560 пикселей в высоту): панели боя ужаты */
+.compact #top { top: 4px; left: 4px; right: 4px; gap: 4px; }
+.compact .pill { height: 24px; padding: 0 8px 0 6px; } .compact .pill b { font-size: 12.5px; }
+.compact .foe { height: 24px; min-width: 62px; padding-top: 2px; font-size: 9px; }
+.compact .tbtn { width: 28px; height: 24px; }
+.compact #bottom { left: 4px; right: 4px; bottom: 4px; gap: 4px; }
+.compact #mini { width: 88px; height: 88px; }
+.compact #miniWrap, .compact .group { border-width: 5px; border-image-width: 12px; }
+.compact #panel { gap: 4px; }
+.compact .gt { min-width: 56px; margin-bottom: 2px; padding: 0 12px 0 5px; font-size: 7.5px; }
+.compact .btns { gap: 3px; }
+.compact .btn { width: 52px; height: 58px; }
+.compact .btn img { width: 40px; height: 40px; }
+.compact .btn .nm { bottom: 12px; font-size: 8px; }
+.compact .btn .cs { bottom: 2px; font-size: 9.5px; }
+.compact .btn .q { font-size: 9px; }
+.compact .ups { width: 108px; gap: 1px; }
+.compact .up { padding: 0 4px; font-size: 9px; }
+.compact #alert { top: 34px; padding: 5px 14px; font-size: 13px; }
+.compact #toast { top: 74px; padding: 5px 14px; font-size: 12px; }
+.compact #tut { top: 34px; padding: 6px 10px 7px; }
+.compact #tut .tx { font-size: 13px; }
+.compact .kc { min-width: 26px; height: 26px; font-size: 14px; }
+.compact #tut .tr { margin-top: 3px; gap: 10px; }
+.compact #tbtns { bottom: 96px; max-height: calc(100% - 110px); }
+.compact .tkb { width: 52px; height: 44px; }
+.compact #possessHud { transform: translateX(-50%) scale(.9); }
+@media (max-height: 520px) { /* телефон в альбомном положении: меню остаётся в три колонки, но ужато; кнопка «В бой» всегда на виду */
+  #menu { grid-template-columns: clamp(190px, 26vw, 260px) 1fr clamp(190px, 26vw, 260px); gap: 4px 10px; padding: 8px 12px 4px; }
+  .mTop { margin: -8px -12px 0; padding: 6px 12px 7px; } .brand p, .mFoot { display: none; }
+  #menu .brand h1 { font-size: 21px; } .tabs button { padding: 5px 10px 4px; font-size: 11.5px; } #menu .plain { padding: 5px 10px; font-size: 11.5px; }
+  .mCol { gap: 5px; } .pane { padding: 1px 2px; border-width: 7px; border-image-width: 18px; }
+  .ph { margin-bottom: 4px; padding: 2px 18px 2px 7px; font-size: 10px; } .seg + .ph { margin-top: 6px; }
+  #facCards { gap: 4px; } .fac { padding: 2px 8px 2px 4px; } .fac img { width: 34px; height: 34px; } .fac b { font-size: 13.5px; } .fac small { font-size: 10px; }
+  #mapPrev { width: 56px; height: 56px; } .mapHead { margin-bottom: 4px; } #mapInfo p, #mapInfo small { display: none; } #mapCards { gap: 4px; } .mapc { padding: 4px 7px 3px; } .mapc b { font-size: 10.5px; } .mapc small { font-size: 9.5px; }
+  #menu .seg button { padding: 5px 3px 4px; font-size: 11.5px; }
+  #startBtn { position: sticky; bottom: 0; padding: 9px 10px; font-size: 16px; }
+  #facInfo { padding: 4px 8px 4px; } #facInfo h2 { font-size: 21px; } #facInfo h2::after { margin-top: 4px; } #facInfo p, .udesc { display: none; } .roster { margin-top: 6px; } .roster figure { max-width: 72px; }
+  #campList { max-height: calc(100vh - 128px); }
+  .ms { padding: 4px 8px 4px 5px; gap: 8px; } .ms .mt b { font-size: 12.5px; } .ms .mt small { font-size: 9.5px; }
+  .vrow { grid-template-columns: 120px 1fr 44px; } .vols { gap: 9px; } .screen h2 { font-size: 22px; } .box.narrow { padding: 10px 16px 12px; gap: 8px; }
+}/* поверните устройство: в вертикальном положении игра закрыта подсказкой */
+@media (orientation: portrait) {
+  .touch #rotate { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; background: #101114; color: #eef1f3; text-align: center; font: 600 17px var(--title); }
+  .touch #rotate svg { width: 76px; height: 76px; fill: none; stroke: var(--brass); stroke-width: 2; stroke-linecap: round; animation: rot 2.4s ease-in-out infinite; }
+}
+@keyframes rot { 0%, 25% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+
+/* пауза и итоги боя на низком экране */
+.compact .screen { padding: 8px; }
+.compact #pauseMenu .box.narrow { max-width: 660px; padding: 6px 16px 10px; gap: 6px; }
+.compact #pauseMenu h2 { font-size: 20px; }
+.compact #pauseMenu .menuBtns { display: grid; grid-template-columns: 1fr 1fr; width: 100%; gap: 6px; }
+.compact #pauseMenu .menuBtns .big { grid-column: 1 / -1; padding: 8px; font-size: 15px; }
+.compact #pauseMenu .plain { padding: 7px 10px; font-size: 12px; }
+.compact .tkeys { margin-top: 2px; padding-top: 6px; }
+.compact .tkeys p { font-size: 11px; line-height: 1.4; }
+.compact #end .box.narrow { padding: 8px 16px 10px; gap: 7px; } .compact #end h1 { font-size: 30px; }
+.compact #endStats div { padding: 5px 4px; } .compact #endStats b { font-size: 18px; } .compact #endStats span { font-size: 10px; }
+.compact .roster figcaption { font-size: 8.5px; }
+
+/* узкий телефон (до 720 пикселей): меню в один столбец, кнопка «В бой» плавает внизу справа */
+@media (max-width: 720px) and (max-height: 520px) {
+  #menu { padding-bottom: 60px; }
+  #startBtn { position: fixed; right: 12px; bottom: 8px; width: auto; margin: 0; padding: 9px 30px; z-index: 6; }
+  #campList { max-height: none; }
+}
+.touch #pInfo { white-space: normal; line-height: 1.2; max-height: 2.4em; }

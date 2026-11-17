@@ -10,7 +10,7 @@ function angDiff(a, b) { let d = (a - b) % TAU; if (d > Math.PI) d -= TAU; if (d
 function blankInput() { return { keys: {}, yaw: 0, aim: 0.7, lmb: false, rmb: false }; }
 // c — { faction, bot, team }. inp — откуда читается управление вселённым воином (у местного игрока — общий Input)
 function mkPlayer(i, c) {
-  return { idx: i, faction: c.faction, fac: FACTIONS[c.faction], bot: !!c.bot, team: c.team, gold: START_GOLD, alive: true, income: 0, alarm: null, ai: { t: rand(0, 1), wave: 5 },
+  return { idx: i, faction: c.faction, fac: FACTIONS[c.faction], bot: !!c.bot, team: c.team, gold: START_GOLD, alive: true, income: 0, alarm: null, ai: { t: rand(0, 1), wave: c.wave || 5 }, idle: c.idle || 0, // idle — секунд, пока бот ничего не делает (для миссий)
     up: { atk: 0, arm: 0, eco: 0, fort: 0 }, research: null, heroLvl: 1, heroXp: 0, heroU: null, heroDeaths: 0, heroBack: 0, lost: 0, bl: 0, autoCast: true, poss: null, inp: i === G.human ? Input : blankInput(), nq: [] };
 }
 // Сообщение игроку: местному — сразу на экран, удалённому — уйдёт по сети
@@ -20,22 +20,28 @@ function note(p, text) { if (p.idx === G.human) G.notes.push(text); else if (G.n
 function newGame(cfg) {
   Object.assign(G, { running: true, time: 0, over: null, ents: [], units: [], blds: [], projs: [], fx: [], parts: [], obstacles: [], players: [], props: [],
     map: MAPS[cfg.map] || MAPS.island, possessed: null, nextId: 1, diff: DIFF[cfg.diff] || DIFF.normal, human: cfg.human || 0, dirty: false, shakes: [], notes: [], heroHit: -9,
-    net: cfg.net || null, evq: [], evDepth: 0, winTeam: undefined, possessLost: false, seed: [Math.random() * 100, Math.random() * 100] });
+    net: cfg.net || null, evq: [], evDepth: 0, winTeam: undefined, possessLost: false, seed: [Math.random() * 100, Math.random() * 100], mission: cfg.mission || null });
   const map = G.map;
   WORLD.w = WORLD.h = map.size;
   const m = 480, W = WORLD.w, H = WORLD.h;
   const spots = map.lay === 'cross' ? [[W / 2, H - m], [W / 2, m], [m, H / 2], [W - m, H / 2]] : [[m, H - m], [W - m, m], [m, m], [W - m, H - m]];
-  const order = cfg.coop ? [0, 2, 3, 1] : [0, 1, 2, 3]; // в совместной игре союзники стоят на одной стороне карты
+  let order = cfg.coop ? [0, 2, 3, 1] : [0, 1, 2, 3]; // в совместной игре союзники стоят на одной стороне карты
+  if (cfg.net) { // в сетевой игре хозяин комнаты не всегда внизу слева: места на карте раздаются случайно (клиенты берут позиции из снимка хозяина)
+    const sh = a => a.sort(() => Math.random() - 0.5);
+    order = cfg.coop ? (Math.random() < 0.5 ? [...sh([0, 2]), ...sh([3, 1])] : [...sh([3, 1]), ...sh([0, 2])]) : sh([0, 1, 2, 3]);
+  }
   cfg.players.forEach((c, i) => {
     const p = mkPlayer(i, c);
+    if (cfg.gold !== undefined && !c.bot) p.gold = cfg.gold; // миссия может менять стартовое золото игрока
     G.players.push(p);
     const [x, y] = spots[order[i]];
     p.hq = spawnBuilding(i, 'hq', x, y, true);
     const a = Math.atan2(H / 2 - y, W / 2 - x);
-    for (let k = 0; k < 3; k++) {
-      const u = spawnUnit(i, p.fac.units[0], x + Math.cos(a + (k - 1) * 0.5) * 95, y + Math.sin(a + (k - 1) * 0.5) * 95);
+    const st = p.fac.start || [p.fac.units[0], p.fac.units[0], p.fac.units[0]]; // стартовый отряд ≈ 180–230 золота у каждой фракции
+    st.forEach((type, k) => {
+      const u = spawnUnit(i, type, x + Math.cos(a + (k - (st.length - 1) / 2) * 0.5) * 95, y + Math.sin(a + (k - (st.length - 1) / 2) * 0.5) * 95);
       u.face = a;
-    }
+    });
     baseDecor(p, x, y, a);
   });
   let tries = 0;
@@ -100,24 +106,24 @@ function popOf(p) {
 // Возвращает '' если можно строить, иначе причину
 function canPlace(p, type, x, y) {
   const r = BUILDINGS[type].r;
-  if (x < r + 30 || y < r + 30 || x > WORLD.w - r - 30 || y > WORLD.h - r - 30) return 'За границей карты';
+  if (x < r + 30 || y < r + 30 || x > WORLD.w - r - 30 || y > WORLD.h - r - 30) return T('За границей карты');
   let near = false;
   for (const e of G.ents) {
     if (e.kind !== 'bld' || e.dead) continue;
     const d = Math.hypot(e.x - x, e.y - y);
-    if (d < e.r + r + 34) return 'Слишком близко к другому зданию';
+    if (d < e.r + r + 34) return T('Слишком близко к другому зданию');
     if (e.owner === p.idx && e.build >= 1 && d < BUILD_RADIUS + e.r) near = true;
   }
-  for (const o of G.obstacles) if (Math.hypot(o.x - x, o.y - y) < o.r + r + 12) return 'Мешает препятствие';
-  if (!near) return 'Стройте рядом со своими зданиями';
-  if (type === 'mine' && countB(p, 'mine') >= MAX_MINES) return 'Максимум шахт: ' + MAX_MINES;
-  if (BUILDINGS[type].tower && countB(p, type) >= maxTowers(p)) return 'Максимум башен: ' + maxTowers(p) + (p.up.fort < UPGRADES.fort.cost.length ? ' (улучшение «Форты» добавит ещё)' : '');
+  for (const o of G.obstacles) if (Math.hypot(o.x - x, o.y - y) < o.r + r + 12) return T('Мешает препятствие');
+  if (!near) return T('Стройте рядом со своими зданиями');
+  if (type === 'mine' && countB(p, 'mine') >= MAX_MINES) return T('Максимум шахт: ') + MAX_MINES;
+  if (BUILDINGS[type].tower && countB(p, type) >= maxTowers(p)) return T('Максимум башен: ') + maxTowers(p) + (p.up.fort < UPGRADES.fort.cost.length ? T(' (улучшение «Форты» добавит ещё)') : '');
   return '';
 }
 
 function tryBuild(p, type, x, y) {
   const cost = buildCost(p, type);
-  if (p.gold < cost) return 'Недостаточно золота';
+  if (p.gold < cost) return T('Недостаточно золота');
   const why = canPlace(p, type, x, y);
   if (why) return why;
   p.gold -= cost;
@@ -132,10 +138,10 @@ function queueUnit(p, slot, b) {
     b = null;
     for (const e of G.ents) if (e.kind === 'bld' && e.owner === p.idx && !e.dead && e.type === 'barracks' && e.build >= 1 && (!b || e.queue.length < b.queue.length)) b = e;
   }
-  if (!b) return 'Сначала постройте казарму';
-  if (b.queue.length >= 6) return 'Очередь заполнена';
-  if (popOf(p) + d.pop > POP_CAP) return 'Достигнут лимит войск';
-  if (p.gold < d.cost) return 'Недостаточно золота';
+  if (!b) return T('Сначала постройте казарму');
+  if (b.queue.length >= 6) return T('Очередь заполнена');
+  if (popOf(p) + d.pop > POP_CAP) return T('Достигнут лимит войск');
+  if (p.gold < d.cost) return T('Недостаточно золота');
   p.gold -= d.cost;
   b.queue.push(type);
   return '';
@@ -144,11 +150,11 @@ function queueUnit(p, slot, b) {
 // ---------- Починка зданий ----------
 function repairCost(b) { return Math.ceil((1 - b.hp / b.maxHp) * (BUILDINGS[b.type].cost || 700) * REPAIR_COST); }
 function setRepair(p, b, on) {
-  if (!b || b.dead || b.kind !== 'bld' || b.owner !== p.idx) return 'Выберите своё здание';
-  if (b.build < 1) return 'Здание ещё строится';
+  if (!b || b.dead || b.kind !== 'bld' || b.owner !== p.idx) return T('Выберите своё здание');
+  if (b.build < 1) return T('Здание ещё строится');
   if (on === undefined) on = !b.repair;
-  if (on && b.hp >= b.maxHp) return 'Здание целое';
-  if (on && p.gold < 5) return 'Недостаточно золота';
+  if (on && b.hp >= b.maxHp) return T('Здание целое');
+  if (on && p.gold < 5) return T('Недостаточно золота');
   b.repair = on;
   return '';
 }
@@ -162,9 +168,9 @@ function rescaleHp(p) { // после улучшения брони или но�
 function upCost(p, key) { return UPGRADES[key].cost[p.up[key]]; }
 function startResearch(p, key) {
   const d = UPGRADES[key], lvl = p.up[key];
-  if (p.research) return p.research.key === key ? 'Уже исследуется' : 'Сначала дождитесь конца исследования';
-  if (lvl >= d.cost.length) return 'Максимальный уровень';
-  if (p.gold < d.cost[lvl]) return 'Недостаточно золота';
+  if (p.research) return p.research.key === key ? T('Уже исследуется') : T('Сначала дождитесь конца исследования');
+  if (lvl >= d.cost.length) return T('Максимальный уровень');
+  if (p.gold < d.cost[lvl]) return T('Недостаточно золота');
   p.gold -= d.cost[lvl];
   p.research = { key, t: 0, time: d.time[lvl] };
   return '';
@@ -177,18 +183,18 @@ function updateResearch(p, dt) {
   p.research = null; p.up[r.key]++;
   if (r.key === 'arm') rescaleHp(p);
   addFx({ type: 'shock', x: p.hq.x, y: p.hq.y, r: p.hq.r * 2.2, life: 0.6, color: '#ffe9a8' }); magic(p.hq.x, p.hq.y, 50, 14, '#ffe9a8');
-  note(p, 'Улучшение «' + UPGRADES[r.key].name + '» — уровень ' + p.up[r.key]); if (p.idx === G.human) Sfx.play('ready');
+  note(p, T('Улучшение «') + UPGRADES[r.key].name + T('» — уровень ') + p.up[r.key]); if (p.idx === G.human) Sfx.play('ready');
 }
 
 function heroNeed(lvl) { return 110 * lvl; }
 function heroCost(p) { return p.heroDeaths ? 150 + 50 * p.heroLvl : UNITS[p.fac.hero].cost; }
 function queueHero(p) {
   const hq = p.hq;
-  if (p.heroU && !p.heroU.dead) return 'Герой уже в строю';
-  if (hq.queue.length) return 'Герой уже в пути';
-  if (G.time < p.heroBack) return 'Герой вернётся через ' + Math.ceil(p.heroBack - G.time) + ' с';
-  if (popOf(p) + UNITS[p.fac.hero].pop > POP_CAP) return 'Достигнут лимит войск';
-  if (p.gold < heroCost(p)) return 'Недостаточно золота';
+  if (p.heroU && !p.heroU.dead) return T('Герой уже в строю');
+  if (hq.queue.length) return T('Герой уже в пути');
+  if (G.time < p.heroBack) return T('Герой вернётся через ') + Math.ceil(p.heroBack - G.time) + T(' с');
+  if (popOf(p) + UNITS[p.fac.hero].pop > POP_CAP) return T('Достигнут лимит войск');
+  if (p.gold < heroCost(p)) return T('Недостаточно золота');
   p.gold -= heroCost(p);
   hq.queue.push(p.fac.hero);
   return '';
@@ -203,7 +209,7 @@ function gainXp(h, amt) {
     h.hp = Math.min(h.maxHp, h.hp + h.maxHp * 0.35);
     addFx({ type: 'shock', x: h.x, y: h.y, r: 70, life: 0.6, color: '#ffe066' }); addFx({ type: 'ring', x: h.x, y: h.y, r: h.r + 20, life: 0.8, color: '#ffe066' });
     magic(h.x, h.y, 14, 18, '#ffe066'); addFx({ type: 'flash', x: h.x, y: h.y, h: 30, color: '#ffe066', power: 1, life: 0.35 });
-    note(p, UNITS[h.type].name + ' — уровень ' + p.heroLvl); if (p.idx === G.human) Sfx.play('ready');
+    note(p, UNITS[h.type].name + T(' — уровень ') + p.heroLvl); if (p.idx === G.human) Sfx.play('ready');
   }
   if (p.heroLvl >= HERO_MAX) p.heroXp = 0;
 }
@@ -342,6 +348,7 @@ function damage(t, amt, src, bm, ranged) {
   if (src && src.ctl) { if (t.kind !== 'bld') amt *= 1.5; addFx({ type: 'num', x: t.x, y: t.y, h: t.r * 2.4, text: Math.round(amt), life: 0.8, pid: src.owner }); }
   t.hp -= amt;
   t.flash = 0.12;
+  if (src && src !== t) t.hitAng = Math.atan2(t.y - src.y, t.x - src.x); // откуда прилетел удар — в эту сторону воин упадёт
   if (t.hp <= 0) kill(t);
 }
 
@@ -370,16 +377,17 @@ function kill(e) {
     const p = G.players[e.owner];
     p.heroU = null; p.heroDeaths++; p.heroBack = G.time + heroDelay(p.heroLvl);
     addFx({ type: 'shock', x: e.x, y: e.y, r: 80, life: 0.6, color: col }); magic(e.x, e.y, 16, 16, col);
-    if (p.alive) note(p, 'Герой пал. Возродить его можно через ' + heroDelay(p.heroLvl) + ' с');
+    if (p.alive) note(p, T('Герой пал. Возродить его можно через ') + heroDelay(p.heroLvl) + T(' с'));
   }
   if (op.poss === e) { op.poss = null; if (e === G.possessed) { G.possessed = null; G.possessLost = true; } }
   if (e.kind === 'bld') {
-    explode(e.x, e.y, e.r * 1.5, true);
+    explode(e.x, e.y, e.r * 1.5, true); Sfx.play('crumble', e.x, e.y);
     burst(e.x, e.y, 24, col, 2.2, 30); smoke(e.x, e.y, 30, 8, e.r * 0.7, '#5a5651', e.r);
     if (e.type === 'hq') eliminate(G.players[e.owner]);
   } else if (e.type === 'tank' || e.type === 'drone' || e.type === 'commander') explode(e.x, e.y, e.r * 1.1, false);
   else if (e.type === 'golem') { burst(e.x, e.y, 14, '#8d8a86', 1.5); magic(e.x, e.y, 16, 8, col); dust(e.x, e.y, 5, 10); }
   else { burst(e.x, e.y, 7, col, 1.1); dust(e.x, e.y, 4, 7); }
+  if (e.kind === 'unit') Sfx.play('die', e.x, e.y);
 }
 
 function eliminate(p) {
@@ -390,7 +398,7 @@ function eliminate(p) {
   const teams = new Set(G.players.filter(q => q.alive).map(q => q.team)), my = G.players[G.human];
   if (teams.size <= 1) { G.winTeam = teams.size ? [...teams][0] : -1; G.over = G.winTeam === my.team ? 'victory' : 'defeat'; }
   else if (!G.net && p.idx === G.human) G.over = 'defeat';
-  else if (G.net && !p.bot) note(p, 'Ваша цитадель пала. Вы наблюдаете за боем');
+  else if (G.net && !p.bot) note(p, T('Ваша цитадель пала. Вы наблюдаете за боем'));
 }
 
 // ---------- Поиск целей ----------
@@ -424,19 +432,19 @@ function fireAt(src, def, target, dmg) {
   G.projs.push({ x: src.x, y: src.y, x0: src.x, y0: src.y, speed: def.proj, dmg, splash: def.splash || 0, src, owner: src.owner, kind: def.pk, bm: def.bm || 1,
     target, gx: target.x, gy: target.y, ang: 0, lob: def.atk === 'lob', h0: src.kind === 'bld' ? 40 : 14, h: 16, trail: 0 });
   muzzle(src, def, Math.atan2(target.y - src.y, target.x - src.x));
-  Sfx.play('shot', src.x, src.y);
+  Sfx.play('shot:' + def.pk, src.x, src.y);
 }
 function fireGround(src, def, gx, gy, dmg, lob) {
   G.projs.push({ x: src.x, y: src.y, x0: src.x, y0: src.y, speed: def.proj, dmg, splash: def.splash || 0, src, owner: src.owner, kind: def.pk, bm: def.bm || 1,
     target: null, gx, gy, ang: 0, lob, h0: src.kind === 'bld' ? 40 : 14, h: 16, trail: 0 });
   muzzle(src, def, Math.atan2(gy - src.y, gx - src.x));
-  Sfx.play('shot', src.x, src.y);
+  Sfx.play('shot:' + def.pk, src.x, src.y);
 }
 function fireDir(src, def, ang, dmg) {
   G.projs.push({ x: src.x, y: src.y, speed: def.proj, dmg, splash: 0, src, owner: src.owner, kind: def.pk, bm: def.bm || 1,
     dir: true, vx: Math.cos(ang) * def.proj, vy: Math.sin(ang) * def.proj, life: (def.range + 60) / def.proj, ang, h0: 14, h: 16, trail: 0 });
   muzzle(src, def, ang);
-  Sfx.play('shot', src.x, src.y);
+  Sfx.play('shot:' + def.pk, src.x, src.y);
 }
 
 // След снаряда: чисто визуальный, по сети не передаётся — каждый клиент рисует его сам
@@ -682,7 +690,7 @@ function updateBuilding(b, dt) {
     if (miss <= 0) b.repair = false;
     else if (G.time - b.hitT > REPAIR_PAUSE) {
       const fr = Math.min(miss, REPAIR_RATE * dt), c = fr * (d.cost || 700) * REPAIR_COST;
-      if (p.gold < c) { b.repair = false; note(p, 'Починка остановлена: нет золота'); }
+      if (p.gold < c) { b.repair = false; note(p, T('Починка остановлена: нет золота')); }
       else {
         p.gold -= c; b.hp = Math.min(b.maxHp, b.hp + fr * b.maxHp);
         if (Math.random() < dt * 7) sparks(b.x + rand(-0.6, 0.6) * b.r, b.y + rand(-0.6, 0.6) * b.r, b.r * rand(0.4, 1.3), 3, '#ffe9a8', 0.6);
@@ -711,7 +719,7 @@ function updateBuilding(b, dt) {
       if (ud.hero) { // герой выходит из цитадели
         G.players[b.owner].heroU = u; u.acd = 2;
         addFx({ type: 'shock', x: u.x, y: u.y, r: 80, life: 0.6, color: '#ffe066' }); magic(u.x, u.y, 14, 20, '#ffe066');
-        note(G.players[b.owner], ud.name + ' готов к бою');
+        note(G.players[b.owner], ud.name + T(' готов к бою'));
       }
       orderUnit(u, 'amove', b.rally.x + rand(-30, 30), b.rally.y + rand(-30, 30));
       if (b.owner === G.human) Sfx.play('ready', b.x, b.y);
@@ -759,7 +767,7 @@ function updateBuilding(b, dt) {
 
 // ---------- Главный шаг ----------
 function update(dt) {
-  if (G.time < SIEGE_START && G.time + dt >= SIEGE_START) for (const p of G.players) if (p.alive) note(p, 'Осадный час: здания слабеют с каждой минутой');
+  if (G.time < SIEGE_START && G.time + dt >= SIEGE_START) for (const p of G.players) if (p.alive) note(p, T('Осадный час: здания слабеют с каждой минутой'));
   G.time += dt;
   if (G.dirty) { G.ents = G.ents.filter(e => !e.dead); G.dirty = false; }
   const units = G.units = G.ents.filter(e => e.kind === 'unit');
@@ -777,7 +785,10 @@ function update(dt) {
   collide(units.filter(u => !u.dead), blds.filter(b => !b.dead).concat(G.obstacles, G.props.filter(q => q.r && !q.dead)));
   updateProjs(dt);
   updateFx(dt);
-  for (const p of G.players) if (p.bot && p.alive) botUpdate(p, dt);
+  for (const p of G.players) if (p.bot && p.alive && G.time >= p.idle) botUpdate(p, dt);
+  // Миссия на выживание: время вышло — победа
+  const ms = G.mission;
+  if (ms && ms.type === 'survive' && !G.over && G.time >= ms.surviveT) { G.winTeam = G.players[G.human].team; G.over = 'victory'; }
 }
 
 function updateFx(dt) {
@@ -800,7 +811,7 @@ function setPossess(p, u) {
   if (p.idx === G.human) G.possessed = p.poss;
 }
 // Эффект только для местного игрока (метки приказов): по сети не уходит
-function localFx(o) { o.max = o.life; G.fx.push(o); }
+function localFx(o) { o.max = o.life; o.local = true; G.fx.push(o); }
 
 // ---------- Журнал эффектов для сети ----------
 // Хост запоминает вызовы эффектов верхнего уровня и рассылает их клиентам; те проигрывают их у себя.

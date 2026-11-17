@@ -2,8 +2,10 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Стратег</title>
+<script src="https://bridge.playgama.com/v2/stable/playgama-bridge.js"></script>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -23,6 +25,14 @@
     <button class="tbtn" id="helpBtn" title="Управление (H)">?</button>
     <button class="tbtn" id="pauseBtn" title="Пауза (P)">❚❚</button>
   </div>
+
+  <div id="tut" class="hidden">
+    <div class="tk"></div>
+    <div class="tr"><div class="ti"></div><div class="tx"></div></div>
+    <div class="tb"><i></i></div>
+    <button id="tutSkip" class="plain hidden">Пропустить обучение</button>
+  </div>
+  <div id="tutPt" class="hidden"><svg viewBox="0 0 28 34"><path d="M14 33 2 17h8V2h8v15h8z"/></svg></div>
 
   <div id="alert" class="hidden">Ваша база атакована!<span>Пробел — перейти к месту боя</span></div>
 
@@ -50,29 +60,49 @@
         <div id="pInfo"></div>
       </div>
     </div>
-    <div id="pHint"><span><kbd>WASD</kbd> движение</span><span><kbd>Мышь</kbd> обзор</span><span><kbd>ЛКМ</kbd> атака</span><span id="pAb"><kbd>ПКМ</kbd> способность</span><span><kbd>Tab</kbd> другой воин</span><span><kbd>Esc</kbd> выйти</span></div>
+    <div id="pHint"><span><kbd>WASD</kbd> движение</span><span><kbd>Мышь</kbd> обзор</span><span><kbd>ЛКМ</kbd> атака</span><span id="pAb"><kbd>ПКМ</kbd> способность</span><span><kbd>Tab</kbd> другой воин</span><span><kbd>F</kbd> выйти</span></div>
   </div>
   <div id="cross" class="hidden"><i></i></div>
   <div id="toast"></div>
+
+  <!-- Сенсорное управление (видно только на телефоне и планшете) -->
+  <div id="tbtns" class="hidden">
+    <button id="tOk" class="tkb hidden"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg><span>Построить</span></button>
+    <button id="tCancel" class="tkb hidden"><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg><span>Отмена</span></button>
+    <button id="tAll" class="tkb"><svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="3"/><circle cx="6" cy="16" r="3"/><circle cx="18" cy="16" r="3"/></svg><span>Вся армия</span></button>
+    <button id="tHome" class="tkb"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V20h-6v-6H9v6H3z"/></svg><span>К базе</span></button>
+    <button id="tAbil" class="tkb hidden"><svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H10L9 22l9-12h-5.5z"/></svg><span>Способность</span></button>
+    <button id="tPoss" class="tkb hidden"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg><span>Вселиться</span></button>
+    <button id="tRepair" class="tkb hidden"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.7 2.7-2.4-.6-.6-2.4z"/></svg><span>Починить</span></button>
+  </div>
+  <div id="tpad" class="hidden">
+    <div id="joy"><i id="joyK"></i></div>
+    <button id="pAtk" class="pb"><svg viewBox="0 0 24 24"><path d="M5 19 17 7M14 5h5v5M5 19l-1-3 3 1"/></svg><span>Удар</span></button>
+    <button id="pSkill" class="pb"><svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H10L9 22l9-12h-5.5z"/></svg><span>Способность</span></button>
+    <button id="pExit" class="pb small"><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg><span>Выйти</span></button>
+    <button id="pNext" class="pb small"><svg viewBox="0 0 24 24"><path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/></svg><span>Другой</span></button>
+  </div>
 </div>
+<div id="rotate"><svg viewBox="0 0 48 48"><rect x="14" y="4" width="20" height="40" rx="3"/><path d="M40 14c3 3 3 17 0 20M37 31l3 3 3-3"/></svg><p>Поверните устройство горизонтально</p></div>
 
 <div id="menu" class="screen">
   <header class="mTop">
     <div class="brand"><h1>Стратег</h1><p>Построй базу, собери армию, разрушь цитадели врагов</p></div>
-    <div id="modeBtns" class="tabs"></div>
+    <div class="mTopR"><div id="modeBtns" class="tabs"></div><button id="menuSnd" class="plain">Звук: вкл</button><button id="menuSet" class="plain">Настройки</button></div>
   </header>
   <aside class="mCol mLeft">
-    <section class="pane"><div class="ph">Фракция</div><div id="facCards"></div></section>
+    <section id="facPane" class="pane"><div class="ph">Фракция</div><div id="facCards"></div></section>
+    <section id="campBox" class="pane hidden"><div class="ph">Кампания</div><div id="campList"></div></section>
     <section id="netBox" class="pane hidden"></section>
   </aside>
   <section id="facInfo"></section>
   <aside class="mCol mRight">
-    <section class="pane">
+    <section id="mapPane" class="pane">
       <div class="ph">Поле боя</div>
       <div class="mapHead"><canvas id="mapPrev" width="190" height="190"></canvas><div id="mapInfo"></div></div>
       <div id="mapCards"></div>
     </section>
-    <section class="pane">
+    <section id="oppPane" class="pane">
       <div class="ph">Противники</div><div id="botBtns" class="seg"></div>
       <div class="ph">Сложность</div><div id="diffBtns" class="seg"></div>
     </section>
@@ -87,6 +117,8 @@
     <p id="pauseNet" class="beta hidden">Сетевая игра: бой продолжается, пока открыто это меню.</p>
     <div class="menuBtns">
       <button id="resumeBtn" class="big small">Продолжить</button>
+      <button id="pauseSnd" class="plain">Звук: вкл</button>
+      <button id="pauseSet" class="plain">Настройки</button>
       <button id="restartBtn" class="plain">Начать заново</button>
       <button id="quitBtn" class="plain">В главное меню</button>
     </div>
@@ -102,18 +134,28 @@
         <p><kbd>R</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> улучшения: оружие, броня, добыча, форты (больше башен)</p>
         <p><kbd>G</kbd> починить выбранное здание, без выбора — все</p>
         <p><kbd>V</kbd> способность героя, <kbd>Shift</kbd>+<kbd>V</kbd> — сам или по приказу</p>
+        <p>Двойной клик по воину — выбрать всех таких же</p>
         <p><kbd>E</kbd> вся армия, <kbd>Пробел</kbd> к базе</p>
+        <p><kbd>Backspace</kbd> отмена: снять выбор, отменить постройку или прицел</p>
       </div>
       <div>
         <h4>Вселение</h4>
-        <p><kbd>F</kbd> или двойной клик — вселиться</p>
+        <p><kbd>F</kbd> — вселиться</p>
         <p><kbd>WASD</kbd> движение, мышь — обзор</p>
         <p><kbd>ЛКМ</kbd> атака</p>
         <p><kbd>ПКМ</kbd> лечение (жрец), способность (герой)</p>
         <p>Колесо — дальность броска и способности героя</p>
         <p><kbd>Tab</kbd> перескочить в соседнего</p>
-        <p><kbd>Esc</kbd> или <kbd>F</kbd> — выйти</p>
+        <p><kbd>F</kbd> или <kbd>Backspace</kbd> — выйти</p>
       </div>
+    </div>
+    <div class="tkeys">
+      <h4>Управление касанием</h4>
+      <p>Касание — выбрать воина или здание, двойное касание по воину — выбрать всех таких же</p>
+      <p>Касание земли — приказ, по врагу — атака</p>
+      <p>Перетащить — двигать камеру, щипок двумя пальцами — масштаб</p>
+      <p>Удержать и повести — рамка выбора</p>
+      <p>Постройка: выберите здание, передвиньте тень пальцем и нажмите «Построить»</p>
     </div>
   </div>
 </div>
@@ -124,16 +166,25 @@
     <p class="sub" id="endSub"></p>
     <div id="endStats"></div>
     <div class="menuBtns row">
+      <button id="nextBtn" class="big small hidden">Следующая миссия</button>
       <button id="againBtn" class="big small">Ещё раз</button>
       <button id="endMenuBtn" class="plain">В главное меню</button>
     </div>
   </div>
 </div>
 
-<script src="js/data.js"></script>
-<script src="js/game.js"></script>
-<script src="js/ai.js"></script>
-<script src="js/net.js"></script>
-<script type="module" src="js/main.js"></script>
+<div id="settings" class="screen hidden">
+  <div class="box narrow">
+    <h2>Настройки</h2>
+    <div class="vols">
+      <label class="vrow"><span>Общая громкость</span><input type="range" class="vs" id="volMaster" min="0" max="100"><b id="volMasterV"></b></label>
+      <label class="vrow"><span>Эффекты</span><input type="range" class="vs" id="volFx" min="0" max="100"><b id="volFxV"></b></label>
+      <label class="vrow"><span>Музыка</span><input type="range" class="vs" id="volMusic" min="0" max="100"><b id="volMusicV"></b><small>Тихий фон, который каждый раз звучит по-новому.</small></label>
+    </div>
+    <button id="setClose" class="big small">Готово</button>
+  </div>
+</div>
+
+<script src="js/boot.js"></script>
 </body>
 </html>
