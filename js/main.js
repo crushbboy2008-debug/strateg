@@ -1139,6 +1139,7 @@ window.addEventListener('mouseup', e => {
   if (e.button === 2) Input.rmb = false;
 });
 window.addEventListener('mousemove', e => {
+  if (UI.touch && performance.now() - (UI.lastTouch || -1e9) < 900) return; // браузер после касания шлёт «эхо» мыши в точку касания — оно не должно сдвигать тень постройки и прицел
   Input.sx = e.clientX; Input.sy = e.clientY;
   if (UI.drag) { UI.drag.x1 = e.clientX; UI.drag.y1 = e.clientY; }
   if (G.possessed && (document.pointerLockElement === cv || e.buttons)) {
@@ -1211,6 +1212,7 @@ const Touch = initTouch({ cv, size: () => [VW, VH], me, pxPerUnit, pickEnt, comm
   snapCam: () => { camSnap = true; } });
 if (matchMedia('(pointer: coarse)').matches || Plat.mobile || /[?&]touch\b/.test(location.search)) setTouch(true);
 window.addEventListener('touchstart', () => setTouch(true), { passive: true });
+for (const ev of ['touchstart', 'touchend']) window.addEventListener(ev, () => { UI.lastTouch = performance.now(); }, { passive: true, capture: true });
 $('possessBtn').onclick = () => possess(UI.sel.find(x => x.kind === 'unit' && !x.dead));
 $('repairBtn').onclick = repairKey;
 

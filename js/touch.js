@@ -12,7 +12,8 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export function initTouch(A) {
   const $ = id => document.getElementById(id);
   const cv = A.cv, pts = new Map();
-  let mode = null, lp = null, pinch = null, lastTap = { t: 0, e: null }, joyId = null, jc = null;
+  let mode = null, lp = null, pinch = null, lastTap = { t: 0, e: null }, joyId = null, jc = null, gp = { x: 0, y: 0 }; // gp — где стоит тень постройки или прицел
+  const setGhost = (x, y) => { gp.x = x; gp.y = y; Input.sx = x; Input.sy = y; };
   const prevent = e => { if (e.cancelable) e.preventDefault(); };
 
   // ---- камера ----
@@ -65,7 +66,7 @@ export function initTouch(A) {
       p.x = t.clientX; p.y = t.clientY;
       if (Math.hypot(p.x - p.x0, p.y - p.y0) > 9) p.moved = true;
       if (mode === 'look') { Input.yaw += dx * 0.0062; Input.aim = clamp(Input.aim - dy * 0.0042, 0, 1); }
-      else if (mode === 'ghost') { if (p.moved) { const [w, h] = A.size(); Input.sx = clamp(Input.sx + dx, 0, w); Input.sy = clamp(Input.sy + dy, 0, h); } }
+      else if (mode === 'ghost') { if (p.moved) { const [w, h] = A.size(); setGhost(clamp(gp.x + dx, 0, w), clamp(gp.y + dy, 0, h)); } }
       else if (mode === 'box') { if (UI.drag) { UI.drag.x1 = p.x; UI.drag.y1 = p.y; } }
       else if (mode === 'pan') { if (p.moved) { clearTimeout(lp); panBy(dx, dy); } }
       else if (mode === 'pinch' && pinch && pts.size >= 2) {
@@ -83,7 +84,7 @@ export function initTouch(A) {
       if (!p) continue;
       pts.delete(t.identifier);
       if (mode === 'box') { A.finishDrag(false); mode = null; }
-      else if (mode === 'ghost') { if (!p.moved && performance.now() - p.t0 < 350) { Input.sx = p.x; Input.sy = p.y; } mode = null; } // короткое касание — перенести тень в эту точку
+      else if (mode === 'ghost') { if (!p.moved && performance.now() - p.t0 < 350) setGhost(p.x, p.y); mode = null; } // короткое касание — перенести тень в эту точку
       else if (mode === 'pan' && !p.moved) { tap(p); mode = null; }
     }
     if (!pts.size) { mode = null; pinch = null; clearTimeout(lp); }
@@ -100,7 +101,7 @@ export function initTouch(A) {
 
   // ---- кнопки поля боя ----
   const btn = (id, fn) => { $(id).addEventListener('click', e => { e.stopPropagation(); fn(); }); };
-  btn('tOk', () => { if (UI.placing) A.placeAt(Input.sx, Input.sy, false); else if (UI.casting) A.castAt(Input.sx, Input.sy); });
+  btn('tOk', () => { Input.sx = gp.x; Input.sy = gp.y; if (UI.placing) A.placeAt(Input.sx, Input.sy, false); else if (UI.casting) A.castAt(Input.sx, Input.sy); });
   btn('tCancel', A.cancelAll);
   btn('tAll', A.selectArmy);
   btn('tHome', A.goBase);
@@ -154,7 +155,7 @@ export function initTouch(A) {
       return;
     }
     const ghost = !!(UI.placing || UI.casting);
-    if (ghost && !lastGhost) { const [w, h] = A.size(); Input.sx = w / 2; Input.sy = h * 0.45; } // тень появляется в центре, дальше её ведёт палец
+    if (ghost && !lastGhost) { const [w, h] = A.size(); setGhost(w / 2, h * 0.45); } // тень появляется в центре, дальше её ведёт палец
     lastGhost = ghost;
     const p = A.me(), hero = p.heroU && !p.heroU.dead, sel = UI.sel;
     const rb = sel.length === 1 && sel[0].kind === 'bld' && sel[0].build >= 1 && sel[0].hp < sel[0].maxHp;
